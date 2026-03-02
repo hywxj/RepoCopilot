@@ -35,19 +35,19 @@ if TYPE_CHECKING:
 def track_lin_vel_xy_yaw_frame_exp(
     env: BaseEnv | Elf3Env, std: float, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
-    """追踪期望的线速度（XY平面），在偏航坐标系下计算。
+    """Tracks the desired linear velocity (XY plane), calculated in the yaw coordinate system.
     
-    将机器人的线速度转换到偏航坐标系（绕Z轴旋转），
-    然后与期望速度（command的前两维）进行比较。
-    使用指数函数将误差映射到(0,1]范围的奖励值。
+    Convert the robot's linear speed to the yaw coordinate system (rotate around the Z axis),
+    Then compare with the expected speed (the first two dimensions of the command).
+    Use an exponential function to map the error to a reward value in the range (0,1].
     
-    参数:
-        env: 环境实例
-        std: 标准差，控制奖励的衰减速度
-        asset_cfg: 资产配置（默认使用机器人）
+    Parameters:
+        env: environment instance
+        std: standard deviation, controls the decay rate of rewards
+        asset_cfg: asset configuration (default uses robot)
         
-    返回:
-        torch.Tensor: 线速度追踪奖励，形状为[num_envs]
+    Return:
+        torch.Tensor: Line speed tracking reward, shape is [num_envs]
     """
     asset: Articulation = env.scene[asset_cfg.name]
     # 将全局线速度转换到偏航坐标系
@@ -64,18 +64,18 @@ def track_lin_vel_xy_yaw_frame_exp(
 def track_ang_vel_z_world_exp(
     env: BaseEnv | Elf3Env, std: float, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
-    """追踪期望的角速度（Z轴），在世界坐标系下计算。
+    """Tracks the desired angular velocity (Z-axis), calculated in world coordinates.
     
-    直接比较机器人绕Z轴的角速度与期望的偏航角速度（command的第三维）。
-    使用指数函数将误差映射到(0,1]范围的奖励值。
+    Directly compare the robot's angular velocity around the Z-axis to the desired yaw angular velocity (the third dimension of the command).
+    Use an exponential function to map the error to a reward value in the range (0,1].
     
-    参数:
-        env: 环境实例
-        std: 标准差，控制奖励的衰减速度
-        asset_cfg: 资产配置（默认使用机器人）
+    Parameters:
+        env: environment instance
+        std: standard deviation, controls the decay rate of rewards
+        asset_cfg: asset configuration (default uses robot)
         
-    返回:
-        torch.Tensor: 角速度追踪奖励，形状为[num_envs]
+    Return:
+        torch.Tensor: Angular velocity tracking reward, shape [num_envs]
     """
     asset: Articulation = env.scene[asset_cfg.name]
     # 计算Z轴角速度误差的平方
@@ -89,48 +89,48 @@ def track_ang_vel_z_world_exp(
 
 
 def lin_vel_z_l2(env: BaseEnv | Elf3Env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
-    """惩罚垂直方向（Z轴）的线速度。
+    """Penalizes the linear velocity in the vertical direction (Z-axis).
     
-    用于防止机器人不必要的跳跃或下沉，保持稳定的站立/行走高度。
+    Used to prevent the robot from unnecessary jumping or sinking and maintain a stable standing/walking height.
     
-    参数:
-        env: 环境实例
-        asset_cfg: 资产配置（默认使用机器人）
+    Parameters:
+        env: environment instance
+        asset_cfg: asset configuration (default uses robot)
         
-    返回:
-        torch.Tensor: 垂直速度惩罚（平方值），形状为[num_envs]
+    Return:
+        torch.Tensor: vertical velocity penalty (squared value), shape [num_envs]
     """
     asset: Articulation = env.scene[asset_cfg.name]
     return torch.square(asset.data.root_lin_vel_b[:, 2])
 
 
 def ang_vel_xy_l2(env: BaseEnv | Elf3Env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
-    """惩罚身体坐标系下的角速度（X和Y轴）。
+    """Penalizes the angular velocity in the body coordinate system (X and Y axes).
     
-    用于保持身体稳定，减少翻滚（roll）和俯仰（pitch）的晃动。
+    Used to maintain body stability and reduce roll and pitch shaking.
     
-    参数:
-        env: 环境实例
-        asset_cfg: 资产配置（默认使用机器人）
+    Parameters:
+        env: environment instance
+        asset_cfg: asset configuration (default uses robot)
         
-    返回:
-        torch.Tensor: XY轴角速度惩罚（平方和），形状为[num_envs]
+    Return:
+        torch.Tensor: XY axis angular velocity penalty (sum of squares), shape is [num_envs]
     """
     asset: Articulation = env.scene[asset_cfg.name]
     return torch.sum(torch.square(asset.data.root_ang_vel_b[:, :2]), dim=1)
 
 
 def energy(env: BaseEnv | Elf3Env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
-    """惩罚能量消耗。
+    """Penalty energy consumption.
     
-    计算关节功率的绝对值之和（扭矩×速度），鼓励节能运动。
+    Calculate the sum of the absolute values ​​of joint power (torque × speed) to encourage energy-saving movements.
     
-    参数:
-        env: 环境实例
-        asset_cfg: 资产配置（默认使用机器人）
+    Parameters:
+        env: environment instance
+        asset_cfg: asset configuration (default uses robot)
         
-    返回:
-        torch.Tensor: 能量消耗惩罚，形状为[num_envs]
+    Return:
+        torch.Tensor: Energy consumption penalty, shape is [num_envs]
     """
     asset: Articulation = env.scene[asset_cfg.name]
     reward = torch.norm(torch.abs(asset.data.applied_torque * asset.data.joint_vel), dim=-1)
@@ -138,31 +138,31 @@ def energy(env: BaseEnv | Elf3Env, asset_cfg: SceneEntityCfg = SceneEntityCfg("r
 
 
 def joint_acc_l2(env: BaseEnv | Elf3Env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
-    """惩罚关节加速度。
+    """Penalizes joint acceleration.
     
-    用于平滑运动，减少关节的突然加速或减速。
+    Used to smooth movement and reduce sudden acceleration or deceleration of joints.
     
-    参数:
-        env: 环境实例
-        asset_cfg: 资产配置（默认使用机器人）
+    Parameters:
+        env: environment instance
+        asset_cfg: asset configuration (default uses robot)
         
-    返回:
-        torch.Tensor: 关节加速度惩罚（平方和），形状为[num_envs]
+    Return:
+        torch.Tensor: joint acceleration penalty (sum of squares), shape [num_envs]
     """
     asset: Articulation = env.scene[asset_cfg.name]
     return torch.sum(torch.square(asset.data.joint_acc[:, asset_cfg.joint_ids]), dim=1)
 
 
 def action_rate_l2(env: BaseEnv | Elf3Env) -> torch.Tensor:
-    """惩罚动作变化率。
+    """Penalty action change rate.
     
-    比较当前动作与上一时刻动作的差异，鼓励平滑的动作序列。
+    Compare the difference between the current action and the action at the previous moment to encourage smooth action sequences.
     
-    参数:
-        env: 环境实例
+    Parameters:
+        env: environment instance
         
-    返回:
-        torch.Tensor: 动作变化率惩罚（平方和），形状为[num_envs]
+    Return:
+        torch.Tensor: action change rate penalty (sum of squares), shape [num_envs]
     """
     return torch.sum(
         torch.square(
@@ -172,10 +172,10 @@ def action_rate_l2(env: BaseEnv | Elf3Env) -> torch.Tensor:
     )
 
 def action_smoothness(env: BaseEnv | Elf3Env) -> torch.Tensor:
-    # 从环境中获取动作缓冲区（存储最近的一系列动作）
+    # Get the action buffer from the environment (stores the most recent series of actions)
     buf = env.action_buffer._circular_buffer.buffer
     
-    # 提取最近三个时间步的动作
+    # Extract actions from the last three time steps
     a_t   = buf[:, -1, :]   # 当前时刻动作
     a_t1  = buf[:, -2, :]   # 上一时刻动作
     a_t2  = buf[:, -3, :]   # 上上时刻动作
@@ -189,58 +189,58 @@ def action_smoothness(env: BaseEnv | Elf3Env) -> torch.Tensor:
     return term_1 + term_2 + term_3
 
 def undesired_contacts(env: BaseEnv | Elf3Env, threshold: float, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
-    """惩罚不希望的身体部位接触地面。
+    """Punishes unwanted body parts for touching the ground.
     
-    检查特定身体部位是否与地面有接触，接触力超过阈值则视为违规。
+    Check whether a specific body part is in contact with the ground. If the contact force exceeds a threshold, it is considered a violation.
     
-    参数:
-        env: 环境实例
-        threshold: 接触力阈值，超过此值视为接触
-        sensor_cfg: 接触传感器配置，指定要检查的身体部位
+    Parameters:
+        env: environment instance
+        threshold: contact force threshold, exceeding this value is considered contact
+        sensor_cfg: Contact sensor configuration, specifying the body part to be checked
         
-    返回:
-        torch.Tensor: 违规接触次数，形状为[num_envs]
+    Return:
+        torch.Tensor: The number of illegal contacts, the shape is [num_envs]
     """
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     net_contact_forces = contact_sensor.data.net_forces_w_history
-    # 检查是否有身体部位的接触力超过阈值
+    # Check if any body part's contact force exceeds a threshold
     is_contact = torch.max(torch.norm(net_contact_forces[:, :, sensor_cfg.body_ids], dim=-1), dim=1)[0] > threshold
     return torch.sum(is_contact, dim=1)
 
 
 def fly(env: BaseEnv | Elf3Env, threshold: float, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
-    """检查机器人是否"飞行"（所有指定身体部位都未接触地面）。
+    """Check that the robot is "flying" (all designated body parts are not touching the ground).
     
-    用于检测机器人是否完全离地，通常用于触发终止条件或惩罚。
+    Used to detect whether the robot is completely off the ground, usually used to trigger termination conditions or penalties.
     
-    参数:
-        env: 环境实例
-        threshold: 接触力阈值
-        sensor_cfg: 接触传感器配置
+    Parameters:
+        env: environment instance
+        threshold: contact force threshold
+        sensor_cfg: Contact sensor configuration
         
-    返回:
-        torch.Tensor: 布尔值，True表示所有指定部位都未接触地面，形状为[num_envs]
+    Return:
+        torch.Tensor: Boolean value, True means that all specified parts are not touching the ground, the shape is [num_envs]
     """
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     net_contact_forces = contact_sensor.data.net_forces_w_history
     is_contact = torch.max(torch.norm(net_contact_forces[:, :, sensor_cfg.body_ids], dim=-1), dim=1)[0] > threshold
-    # 检查是否所有指定部位都未接触（即"飞行"状态）
+    # Check that all specified parts are not in contact (i.e. "flying" state)
     return torch.sum(is_contact, dim=-1) < 0.5
 
 
 def flat_orientation_l2(
     env: BaseEnv | Elf3Env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
-    """惩罚非水平的身体姿态。
+    """Punishes non-horizontal body posture.
     
-    通过投影重力向量到身体坐标系，检查身体是否保持水平（直立）。
+    Check whether the body remains level (upright) by projecting the gravity vector into the body coordinate system.
     
-    参数:
-        env: 环境实例
-        asset_cfg: 资产配置（默认使用机器人）
+    Parameters:
+        env: environment instance
+        asset_cfg: asset configuration (default uses robot)
         
-    返回:
-        torch.Tensor: 身体倾斜惩罚（重力投影的平方和），形状为[num_envs]
+    Return:
+        torch.Tensor: body tilt penalty (sum of squares of gravity projection), shape [num_envs]
     """
     asset: Articulation = env.scene[asset_cfg.name]
     return torch.sum(torch.square(asset.data.projected_gravity_b[:, :2]), dim=1)
@@ -278,15 +278,15 @@ def feet_orientation_euler(env: Elf3Env, asset_cfg: SceneEntityCfg = SceneEntity
     return r
 
 def is_terminated(env: BaseEnv | Elf3Env) -> torch.Tensor:
-    """惩罚非超时导致的提前终止。
+    """Penalize early termination caused by non-timeout.
     
-    用于识别由于违反约束（如摔倒）而导致的提前终止，而非正常的回合超时。
+    Used to identify early termination due to a constraint violation (such as a fall) instead of the normal round timeout.
     
-    参数:
-        env: 环境实例
+    Parameters:
+        env: environment instance
         
-    返回:
-        torch.Tensor: 提前终止的惩罚标志，形状为[num_envs]
+    Return:
+        torch.Tensor: Early termination penalty flag, shape [num_envs]
     """
     return env.reset_buf * ~env.time_out_buf
 
@@ -294,18 +294,18 @@ def is_terminated(env: BaseEnv | Elf3Env) -> torch.Tensor:
 def feet_air_time_positive_biped(
     env: BaseEnv | Elf3Env, threshold: float, sensor_cfg: SceneEntityCfg
 ) -> torch.Tensor:
-    """奖励双足机器人的脚部空中时间（步态周期性）。
+    """Reward bipedal robots for foot air time (gait periodicity).
     
-    计算脚部在空中的时间（摆动阶段），但只在单腿支撑阶段给予奖励。
-    用于鼓励自然的步态模式。
+    Count the time the foot is in the air (swing phase), but only reward during the single-leg support phase.
+    Used to encourage natural gait patterns.
     
-    参数:
-        env: 环境实例
-        threshold: 最大奖励的空中时间阈值
-        sensor_cfg: 接触传感器配置
+    Parameters:
+        env: environment instance
+        threshold: air time threshold for maximum reward
+        sensor_cfg: Contact sensor configuration
         
-    返回:
-        torch.Tensor: 脚部空中时间奖励，形状为[num_envs]
+    Return:
+        torch.Tensor: Foot air time reward, shape is [num_envs]
     """
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     air_time = contact_sensor.data.current_air_time[:, sensor_cfg.body_ids]
@@ -328,25 +328,25 @@ def feet_air_time_positive_biped(
 def feet_slide(
     env: BaseEnv | Elf3Env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
-    """惩罚脚部在地面上滑动。
+    """Punishing the foot for sliding on the ground.
     
-    计算接触地面时脚部的水平速度，防止脚部打滑。
+    Calculate the horizontal speed of the foot when it touches the ground to prevent the foot from slipping.
     
-    参数:
-        env: 环境实例
-        sensor_cfg: 接触传感器配置
-        asset_cfg: 资产配置（默认使用机器人）
+    Parameters:
+        env: environment instance
+        sensor_cfg: Contact sensor configuration
+        asset_cfg: asset configuration (default uses robot)
         
-    返回:
-        torch.Tensor: 脚部滑动惩罚，形状为[num_envs]
+    Return:
+        torch.Tensor: foot sliding penalty, shape is [num_envs]
     """
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-    # 检测脚部是否接触地面（接触力>1.0）
+    # Detect whether the foot is in contact with the ground (contact force >1.0)
     contacts = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :].norm(dim=-1).max(dim=1)[0] > 1.0
     asset: Articulation = env.scene[asset_cfg.name]
-    # 获取脚部在水平面（XY）的速度
+    # Get the speed of the foot on the horizontal plane (xy)
     body_vel = asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2]
-    # 只惩罚接触时的滑动速度
+    # Only penalizes sliding speed on contact
     reward = torch.sum(body_vel.norm(dim=-1) * contacts, dim=1)
     return reward
 
@@ -354,23 +354,23 @@ def feet_slide(
 def body_force(
     env: BaseEnv | Elf3Env, sensor_cfg: SceneEntityCfg, threshold: float = 500, max_reward: float = 400
 ) -> torch.Tensor:
-    """惩罚过大的身体接触力。
+    """Punishes excessive physical contact.
     
-    监控特定身体部位的垂直接触力，防止过大的冲击力。
+    Monitor vertical contact forces on specific body parts to prevent excessive impact forces.
     
-    参数:
-        env: 环境实例
-        sensor_cfg: 接触传感器配置
-        threshold: 开始惩罚的力阈值
-        max_reward: 最大惩罚值
+    Parameters:
+        env: environment instance
+        sensor_cfg: Contact sensor configuration
+        threshold: the force threshold at which punishment begins
+        max_reward: maximum penalty value
         
-    返回:
-        torch.Tensor: 身体接触力惩罚，形状为[num_envs]
+    Return:
+        torch.Tensor: body contact force penalty, shape is [num_envs]
     """
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-    # 获取身体部位的垂直接触力（Z轴）
+    # Get the vertical contact force of the body part (z-axis)
     reward = contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, 2].norm(dim=-1)
-    # 只惩罚超过阈值的力
+    # Only punish forces above a threshold
     reward[reward < threshold] = 0
     reward[reward > threshold] -= threshold
     reward = reward.clamp(min=0, max=max_reward)
@@ -378,20 +378,20 @@ def body_force(
 
 
 def joint_deviation_l1(env: BaseEnv | Elf3Env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
-    """惩罚关节位置偏离默认位置（只在零速时生效）。
+    """Penalizes the joint position to deviate from the default position (only takes effect at zero speed).
     
-    鼓励机器人在静止时保持默认的站立姿态。
+    Encourage the robot to maintain its default standing posture when stationary.
     
-    参数:
-        env: 环境实例
-        asset_cfg: 资产配置（默认使用机器人）
+    Parameters:
+        env: environment instance
+        asset_cfg: asset configuration (robot is used by default)
         
-    返回:
-        torch.Tensor: 关节位置偏差惩罚（L1范数），形状为[num_envs]
+    Return:
+        torch.Tensor: Joint position deviation penalty (L1 norm), shape is [num_envs]
     """
     asset: Articulation = env.scene[asset_cfg.name]
     angle = asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
-    # 只在速度命令很小时生效
+    # Only takes effect when the speed command is very small
     zero_flag = (
         torch.norm(env.command_generator.command[:, :2], dim=1) + torch.abs(env.command_generator.command[:, 2])
     ) < 0.1
@@ -407,16 +407,16 @@ def joint_deviation_l2(env: BaseEnv | Elf3Env, asset_cfg: SceneEntityCfg = Scene
     return torch.sum(torch.square(angle), dim=1) * ~zero_flag
 
 def joint_deviation_l1_always(env: BaseEnv | Elf3Env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
-    """始终生效的关节偏差惩罚（不受速度命令影响）。
+    """Joint deflection penalties that are always in effect (not affected by speed commands).
     
-    与上一个函数类似，但无论速度命令如何都生效。
+    Similar to the previous function, but takes effect regardless of the speed command.
     
-    参数:
-        env: 环境实例
-        asset_cfg: 资产配置（默认使用机器人）
+    Parameters:
+        env: environment instance
+        asset_cfg: asset configuration (robot is used by default)
         
-    返回:
-        torch.Tensor: 关节位置偏差惩罚（L1范数），形状为[num_envs]
+    Return:
+        torch.Tensor: Joint position deviation penalty (L1 norm), shape is [num_envs]
     """
     asset: Articulation = env.scene[asset_cfg.name]
     angle = asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
@@ -426,16 +426,16 @@ def joint_deviation_l1_always(env: BaseEnv | Elf3Env, asset_cfg: SceneEntityCfg 
 def body_orientation_l2(
     env: BaseEnv | Elf3Env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
-    """惩罚特定身体部位的非水平姿态。
+    """Penalizes non-horizontal posture of specific body parts.
     
-    将重力向量转换到指定身体部位的坐标系，检查其是否垂直。
+    Convert the gravity vector to the coordinate system of the specified body part and check whether it is vertical.
     
-    参数:
-        env: 环境实例
-        asset_cfg: 资产配置（默认使用机器人），body_ids应包含要检查的部位
+    Parameters:
+        env: environment instance
+        asset_cfg: asset configuration (robot is used by default), body_ids should contain the parts to be checked
         
-    返回:
-        torch.Tensor: 身体部位倾斜惩罚，形状为[num_envs]
+    Return:
+        torch.Tensor: Body part tilt penalty, shape is [num_envs]
     """
     asset: Articulation = env.scene[asset_cfg.name]
     # 将重力向量转换到身体部位的坐标系

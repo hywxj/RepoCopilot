@@ -73,13 +73,13 @@ class GaitCfg:
 
 @configclass
 class LiteRewardCfg:
-    track_lin_vel_xy_exp = RewTerm(func=mdp.track_lin_vel_xy_yaw_frame_exp, weight=5.0, params={"std": 0.5})#鼓励更强的速度跟踪,降低std到0.5-0.6，使奖励更严格（偏差大时惩罚更重）
+    track_lin_vel_xy_exp = RewTerm(func=mdp.track_lin_vel_xy_yaw_frame_exp, weight=5.0, params={"std": 0.5})
     track_ang_vel_z_exp = RewTerm(func=mdp.track_ang_vel_z_world_exp, weight=5.0, params={"std": 0.5})
     lin_vel_z_l2 = RewTerm(func=mdp.lin_vel_z_l2, weight=-1.0)
     ang_vel_xy_l2 = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
-    energy = RewTerm(func=mdp.energy, weight=-1e-3)#更省力
+    energy = RewTerm(func=mdp.energy, weight=-1e-3)
     dof_acc_l2 = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
-    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)#太高会抑制动作变化
+    action_rate_l2 = RewTerm(func=mdp.action_rate_l2, weight=-0.01)
     action_rate_smooth = RewTerm(func=mdp.action_smoothness, weight=-0.003)
     
     ankle_torque = RewTerm(func=mdp.ankle_torque, weight=-0.0005)
@@ -94,9 +94,7 @@ class LiteRewardCfg:
         params={
             "sensor_cfg": SceneEntityCfg(
                 "contact_sensor", body_names=[".*_knee_y.*", ".*_hip_z.*", ".*_hip_y.*", ".*_shoulder_y.*", ".*_shoulder_z.*", ".*_wrist_z.*", ".*_elbow_y.*", "waist_z.*", "torso_link"]
-                # "contact_sensor", body_names=[".*_hip_z.*", ".*_hip_y.*", ".*_shoulder_y.*", ".*_shoulder_z.*", ".*_wrist_z.*", "waist_z.*", "torso_link"]
             ),
-            # "threshold": 1.0,
             "threshold": 3.0,
         },
     )
@@ -112,14 +110,10 @@ class LiteRewardCfg:
     flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-1.0)
 
     termination_penalty = RewTerm(func=mdp.is_terminated, weight=-200.0)
-    # termination_penalty = RewTerm(func=mdp.is_terminated, weight=-100.0)#碰到自己挂了
 
     feet_slide = RewTerm(
         func=mdp.feet_slide,
         weight=-0.25,
-        # weight=-2.0,
-        # weight=-0.5,  # 从-0.25增加，加强防拖脚
-        # weight=-1.0,  # 从-0.25增加，加强防拖脚
         params={
             "sensor_cfg": SceneEntityCfg("contact_sensor", body_names=".*ankle_x.*"),
             "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_x.*"),
@@ -130,15 +124,13 @@ class LiteRewardCfg:
         weight=-3e-3,
         params={
             "sensor_cfg": SceneEntityCfg("contact_sensor", body_names=".*_ankle_x.*"),
-            "threshold": 500,   # 鼓励轻足触地
-            # "threshold": 400,#
+            "threshold": 500,   
             "max_reward": 400,
         },
     )
     feet_too_near = RewTerm(
         func=mdp.feet_too_near_humanoid,
         weight=-2.0,
-        # params={"asset_cfg": SceneEntityCfg("robot", body_names=[".*_ankle_x.*"]), "threshold": 0.2},
         params={"asset_cfg": SceneEntityCfg("robot", body_names=[".*_ankle_x.*"]), "threshold": 0.27},
     )
     feet_stumble = RewTerm(
@@ -146,7 +138,7 @@ class LiteRewardCfg:
         weight=-2.0,
         params={"sensor_cfg": SceneEntityCfg("contact_sensor", body_names=[".*_ankle_x.*"])},
     )
-    feet_y_distance = RewTerm(func=mdp.feet_y_distance, weight=-2.0)  # 平移碰撞
+    feet_y_distance = RewTerm(func=mdp.feet_y_distance, weight=-2.0)
     
     # feet_orientation_l2 = RewTerm(
     #     func=mdp.feet_orientation_l2,
@@ -336,7 +328,6 @@ class LiteRewardCfg:
 
 @configclass
 class Elf3WalkFlatEnvCfg:
-    # amp_motion_files_display = ["legged_lab/envs/elf3/datasets/motion_visualization/walk_around.txt"]
     amp_motion_files_display = [
                                 # "legged_lab/envs/elf3/datasets/motion_visualization/stand.txt",
                                 "legged_lab/envs/elf3/datasets/motion_visualization/stand_back.txt",
@@ -372,19 +363,6 @@ class Elf3WalkFlatEnvCfg:
         actor_obs_history_length=10,
         critic_obs_history_length=10,
         # critic_obs_history_length=1,
-        # action_scale_mujoco=[
-        #     0.231, 0.154, 0.213,  # waist_y, waist_x, waist_z
-        #     0.213, 0.213, 0.231,  # l_hip_y, l_hip_x, l_hip_z
-        #     0.213, 0.373, 0.230,  # l_knee_y, l_ankle_y, l_ankle_x
-        #     0.213, 0.213, 0.231,  # r_hip_y, r_hip_x, r_hip_z
-        #     0.213, 0.373, 0.230,  # r_knee_y, r_ankle_y, r_ankle_x
-        #     0.231, 0.231, 0.373,  # l_shoulder_y, l_shoulder_x, l_shoulder_z
-        #     0.231, 0.373,         # l_elbow_y, l_wrist_x
-        #     0.373, 0.373,         # l_wrist_y, l_wrist_z
-        #     0.231, 0.231, 0.373,  # r_shoulder_y, r_shoulder_x, r_shoulder_z
-        #     0.231, 0.373,         # r_elbow_y, r_wrist_x
-        #     0.373, 0.373,         # r_wrist_y, r_wrist_z
-        # ],
         action_scale =[
             0.231, 0.231, 0.231,
             0.231, 0.231, 0.154,
@@ -396,8 +374,6 @@ class Elf3WalkFlatEnvCfg:
             0.213, 0.213, 
             0.373, 0.373, 0.23, 0.23,
         ],
-        # 只保留真正表示倒地的部位，去掉手臂相关(shoulder/elbow/wrist)避免正常摆臂自碰撞触发重置
-        # terminate_contacts_body_names=[".*_hip_z.*",  "waist_z.*", "torso_link"],
         terminate_contacts_body_names=[".*_hip_z.*",".*_shoulder_y.*", ".*_shoulder_z.*",".*_wrist_z.*",  "waist_z.*", "torso_link"],
         feet_body_names=[".*_ankle_x.*"],
     )
@@ -421,9 +397,9 @@ class Elf3WalkFlatEnvCfg:
     commands: CommandsCfg = CommandsCfg(
         resampling_time_range=(10.0, 10.0),
         # resampling_time_range=(10.0, 20.0),
-        # rel_standing_envs=0.3,#增加站立环境的比例，让模型学会在站立环境中保持稳定，同时也能适应前进命令
+        # rel_standing_envs=0.3,
         # rel_standing_envs=0.2,
-        rel_standing_envs=0.1,#减少站立环境的比例，强制更多前进命令
+        rel_standing_envs=0.1,
         rel_heading_envs=1.0,
         heading_command=True,
         heading_control_stiffness=0.5,
@@ -492,10 +468,8 @@ class Elf3WalkFlatEnvCfg:
             push_robot=EventTerm(
                 func=mdp.push_by_setting_velocity,
                 mode="interval",
-                # interval_range_s=(10.0, 15.0),#每10-15s推一下
-                interval_range_s=(6.0, 12.0),#更频繁推机器人，强制学习恢复前进
-                # interval_range_s=(5.0, 10.0),#更频繁推机器人，强制学习恢复前进
-                # interval_range_s=(2.0, 6.0),#更频繁推机器人，强制学习恢复前进
+                # interval_range_s=(10.0, 15.0),
+                interval_range_s=(6.0, 12.0),
                 # params={"velocity_range": {"x": (-1.0, 1.0), "y": (-1.0, 1.0)}},
                 params={"velocity_range": {"x": (-1.5, 1.5), "y": (-1.5, 1.5)}},
             ),
@@ -530,7 +504,7 @@ class Elf3WalkAgentCfg(RslRlOnPolicyRunnerCfg):
         num_learning_epochs=5,
         num_mini_batches=4,
         learning_rate=1.0e-3,
-        # learning_rate=5.0e-4,#避免后期波动
+        # learning_rate=5.0e-4,
         schedule="adaptive",
         gamma=0.99,
         lam=0.95,
@@ -539,7 +513,7 @@ class Elf3WalkAgentCfg(RslRlOnPolicyRunnerCfg):
         normalize_advantage_per_mini_batch=False,
         symmetry_cfg=None,  # RslRlSymmetryCfg()
         # symmetry_cfg=RslRlSymmetryCfg(),  # RslRlSymmetryCfg()
-        rnd_cfg=None,  # RslRlRndCfg() #好奇心机制
+        rnd_cfg=None,  # RslRlRndCfg() 
     )
     clip_actions = None
     save_interval = 100
@@ -554,14 +528,7 @@ class Elf3WalkAgentCfg(RslRlOnPolicyRunnerCfg):
     load_checkpoint = "model_.*.pt"
 
     # amp parameter
-    # amp_reward_coef = 0.8#0.5
-    # amp_reward_coef = 0.55
-    # amp_reward_coef = 0.5
-    # amp_reward_coef = 0.4
     amp_reward_coef = 0.3
-    # amp_reward_coef = 0.2
-    # amp_reward_coef = 0.15
-    # amp_reward_coef = 0.1
     # amp_motion_files = ["legged_lab/envs/elf3/datasets/motion_amp_expert/walk.txt"]
     amp_motion_files = [
                         # "legged_lab/envs/elf3/datasets/motion_amp_expert/stand.txt",
@@ -577,11 +544,7 @@ class Elf3WalkAgentCfg(RslRlOnPolicyRunnerCfg):
     amp_task_reward_lerp = 0.6#0.7
     # amp_task_reward_lerp = 0.65#0.7
     # amp_task_reward_lerp = 0.7#0.7
-    # amp_task_reward_lerp = 0.8
-    # amp_task_reward_lerp = 0.85
-    # amp_task_reward_lerp = 0.9
     amp_discr_hidden_dims = [1024, 512, 256]
     # min_normalized_std = [0.05] * 20
     min_normalized_std = [0.05] * 29
-    # min_normalized_std = [0.08] * 29#控制噪声下限
-    # min_normalized_std = [0.1] * 29#控制噪声下限
+ 

@@ -77,6 +77,7 @@ python legged_lab/scripts/amp_sim2sim_lite.py --policy logs/walk/2026-03-02_00-4
 ```
 
 ### TensorBoard
+
 ```bash
 tensorboard --port=6006 --samples_per_plugin scalars=999999 --logdir logs/walk/
 ```
@@ -84,12 +85,18 @@ tensorboard --port=6006 --samples_per_plugin scalars=999999 --logdir logs/walk/
 
 ### Motion Retargeting
 
+```bash
+git clone https://github.com/MelodyAI/GMR.git
+```
+
 ### gmr_to_visualization
+
 ```bash
 python legged_lab/scripts/gmr_data_conversion.py --input_pkl legged_lab/envs/elf3/datasets/amp/walk_run.pkl --output_txt legged_lab/envs/elf3/datasets/motion_visualization/walk.txt
 ```
 
 ### visaul_to_amp_expert
+
 ```bash
 python legged_lab/scripts/play_amp_animation.py --task=walk_elf3 --num_envs=1 --save_path legged_lab/envs/elf3/datasets/motion_amp_expert/walk.txt --fps 30.0
 ```

@@ -10,7 +10,6 @@ TienKung-Lab is built with IsaacSim 4.5.0 and IsaacLab 2.1.0.
 cd TienKung-Lab
 git clone https://github.com/isaac-sim/IsaacLab.git
 cd IsaacLab
-git checkout v2.1.0
 
 conda create -n tglab python=3.10
 conda activate tglab

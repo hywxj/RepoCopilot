@@ -2,7 +2,7 @@
 tglab for bxi-elf3
 
 ## Installation
-TienKung-Lab is built with IsaacSim 4.5.0 and IsaacLab 2.1.0.
+TienKung-Lab is built with Cuda121，IsaacSim 4.5.0 and IsaacLab 2.1.0.
 
 - Install Isaac Lab 
 

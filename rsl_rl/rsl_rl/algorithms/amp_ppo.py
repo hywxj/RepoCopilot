@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from itertools import chain
 
 import torch
@@ -58,6 +59,7 @@ class AMPPPO:
         desired_kl=0.01,
         device="cpu",
         normalize_advantage_per_mini_batch=False,
+        stair_action_teacher_coef=0.0,
         # RND parameters
         rnd_cfg: dict | None = None,
         # Symmetry parameters
@@ -146,6 +148,39 @@ class AMPPPO:
         self.schedule = schedule
         self.learning_rate = learning_rate
         self.normalize_advantage_per_mini_batch = normalize_advantage_per_mini_batch
+        self.stop_actor_anchor = None
+        self.stop_anchor_indices = []
+        self.stop_anchor_coef = 0.0
+        self.stair_action_teacher_coef = stair_action_teacher_coef
+        if stair_action_teacher_coef < 0 or (stair_action_teacher_coef and (policy.is_recurrent or symmetry_cfg is not None)):
+            raise ValueError("Stair action guidance requires a feedforward, non-augmented policy and nonnegative weight.")
+
+    def set_stop_actor_anchor(self, actor, observation_indices, coefficient):
+        """Training-only protection of a previously learned stationary action."""
+        if coefficient <= 0 or not observation_indices:
+            raise ValueError("Stop anchor needs phase indices and a positive coefficient.")
+        self.stop_actor_anchor = deepcopy(actor).to(self.device).eval().requires_grad_(False)
+        self.stop_anchor_indices = list(observation_indices)
+        self.stop_anchor_coef = coefficient
+
+    def stop_anchor_loss(self, observations, actions):
+        if self.stop_actor_anchor is None:
+            return actions.sum() * 0.
+        stopping = observations[:, self.stop_anchor_indices].amax(dim=1) > .5
+        if not stopping.any():
+            return actions.sum() * 0.
+        with torch.no_grad():
+            reference = self.stop_actor_anchor(observations[stopping])
+        return (actions[stopping]-reference).square().mean()
+
+    @staticmethod
+    def stair_action_teacher_loss(actions, teacher):
+        if teacher is None:
+            return actions.sum()*0.
+        selected = teacher[:, -1] > .5
+        if not selected.any():
+            return actions.sum()*0.
+        return (actions[selected]-teacher[selected, :-1].detach()).square().mean()
 
     def init_storage(
         self, training_type, num_envs, num_transitions_per_env, actor_obs_shape, critic_obs_shape, actions_shape
@@ -228,6 +263,8 @@ class AMPPPO:
         mean_grad_pen_loss = 0
         mean_policy_pred = 0
         mean_expert_pred = 0
+        mean_stop_anchor_loss = 0
+        mean_stair_teacher_loss = 0
         # -- RND loss
         if self.rnd:
             mean_rnd_loss = 0
@@ -269,7 +306,8 @@ class AMPPPO:
                 hid_states_batch,
                 masks_batch,
                 rnd_state_batch,
-            ) = sample
+            ) = sample[:12]
+            stair_teacher_batch = sample[12] if len(sample) > 12 else None
 
             # number of augmentations per sample
             # we start with 1 and increase it if we use symmetry augmentation
@@ -373,6 +411,10 @@ class AMPPPO:
                 value_loss = (returns_batch - value_batch).pow(2).mean()
 
             loss = surrogate_loss + self.value_loss_coef * value_loss - self.entropy_coef * entropy_batch.mean()
+            stop_anchor_loss = self.stop_anchor_loss(obs_batch[:original_batch_size], mu_batch)
+            loss += self.stop_anchor_coef * stop_anchor_loss
+            stair_teacher_loss = self.stair_action_teacher_loss(mu_batch, stair_teacher_batch)
+            loss += self.stair_action_teacher_coef * stair_teacher_loss
 
             # Symmetry loss
             if self.symmetry:
@@ -468,6 +510,8 @@ class AMPPPO:
             mean_grad_pen_loss += grad_pen_loss.item()
             mean_policy_pred += policy_d.mean().item()
             mean_expert_pred += expert_d.mean().item()
+            mean_stop_anchor_loss += stop_anchor_loss.item()
+            mean_stair_teacher_loss += stair_teacher_loss.item()
             # -- RND loss
             if mean_rnd_loss is not None:
                 mean_rnd_loss += rnd_loss.item()
@@ -491,6 +535,7 @@ class AMPPPO:
         mean_grad_pen_loss /= num_updates
         mean_policy_pred /= num_updates
         mean_expert_pred /= num_updates
+        mean_stop_anchor_loss /= num_updates
         self.storage.clear()
 
         # construct the loss dictionary
@@ -507,6 +552,10 @@ class AMPPPO:
             loss_dict["rnd"] = mean_rnd_loss
         if self.symmetry:
             loss_dict["symmetry"] = mean_symmetry_loss
+        if self.stop_actor_anchor is not None:
+            loss_dict["stop_anchor"] = mean_stop_anchor_loss
+        if self.stair_action_teacher_coef:
+            loss_dict["stair_action_teacher"] = mean_stair_teacher_loss/num_updates
 
         return loss_dict
 

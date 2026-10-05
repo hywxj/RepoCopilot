@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import inspect
 import os
 import statistics
 import time
@@ -33,6 +34,7 @@ from rsl_rl.modules import (
     ActorCriticRecurrent,
     Discriminator,
     EmpiricalNormalization,
+    GatedResidualActorCritic,
     StudentTeacher,
     StudentTeacherRecurrent,
 )
@@ -126,6 +128,14 @@ class AmpOnPolicyRunner:
 
         # initialize algorithm
         alg_class = eval(self.alg_cfg.pop("class_name"))
+        alg_kwargs = dict(self.alg_cfg)
+        alg_init_params = inspect.signature(alg_class.__init__).parameters
+        if not any(param.kind == inspect.Parameter.VAR_KEYWORD for param in alg_init_params.values()):
+            supported_keys = set(alg_init_params)
+            ignored_keys = sorted(set(alg_kwargs) - supported_keys)
+            if ignored_keys:
+                print(f"[INFO] Ignoring unsupported {alg_class.__name__} cfg keys: {ignored_keys}")
+            alg_kwargs = {key: value for key, value in alg_kwargs.items() if key in supported_keys}
         self.alg: AMPPPO = alg_class(
             policy,
             discriminator,
@@ -133,7 +143,7 @@ class AmpOnPolicyRunner:
             amp_normalizer,
             device=self.device,
             min_std=min_std,
-            **self.alg_cfg,
+            **alg_kwargs,
             multi_gpu_cfg=self.multi_gpu_cfg,
         )
 
@@ -238,11 +248,26 @@ class AmpOnPolicyRunner:
         tot_iter = start_iter + num_learning_iterations
         for it in range(start_iter, tot_iter):
             start = time.time()
+            residual_gate_sum = 0.0
+            residual_abs_sum = 0.0
+            residual_rms_sum = 0.0
+            residual_diag_steps = 0
             # Rollout
             with torch.inference_mode():
                 for _ in range(self.num_steps_per_env):
                     # Sample actions
                     actions = self.alg.act(obs, privileged_obs, amp_obs)
+                    if getattr(self.alg, "stair_action_teacher_coef", 0.):
+                        reference, valid = self.env.stair_action_guidance(self.alg.transition.action_mean.to(self.env.device))
+                        self.alg.transition.stair_teacher_actions = torch.cat((
+                            reference.to(self.device),
+                            valid[:, None].to(device=self.device, dtype=actions.dtype)), dim=1)
+                    actor = getattr(self.alg.policy, "actor", None)
+                    if actor is not None and hasattr(actor, "last_applied_residual"):
+                        residual_gate_sum += actor.last_gate.mean().item()
+                        residual_abs_sum += actor.last_applied_residual.abs().mean().item()
+                        residual_rms_sum += actor.last_applied_residual.square().mean().sqrt().item()
+                        residual_diag_steps += 1
                     # Step the environment
                     obs, rewards, dones, infos = self.env.step(actions.to(self.env.device))
                     next_amp_obs = self.env.get_amp_obs_for_expert_trans()
@@ -384,6 +409,11 @@ class AmpOnPolicyRunner:
 
         # -- Policy
         self.writer.add_scalar("Policy/mean_noise_std", mean_std.item(), locs["it"])
+        if locs.get("residual_diag_steps", 0) > 0:
+            diag_steps = locs["residual_diag_steps"]
+            self.writer.add_scalar("Policy/geometry_gate_fraction", locs["residual_gate_sum"] / diag_steps, locs["it"])
+            self.writer.add_scalar("Policy/geometry_residual_abs", locs["residual_abs_sum"] / diag_steps, locs["it"])
+            self.writer.add_scalar("Policy/geometry_residual_rms", locs["residual_rms_sum"] / diag_steps, locs["it"])
 
         # -- Performance
         self.writer.add_scalar("Perf/total_fps", fps, locs["it"])
@@ -439,6 +469,11 @@ class AmpOnPolicyRunner:
             for key, value in locs["loss_dict"].items():
                 log_string += f"""{f'{key}:':>{pad}} {value:.4f}\n"""
 
+        if locs.get("residual_diag_steps", 0) > 0:
+            diag_steps = locs["residual_diag_steps"]
+            log_string += f"""{'Geometry gate fraction:':>{pad}} {locs['residual_gate_sum'] / diag_steps:.4f}\n"""
+            log_string += f"""{'Geometry residual |a|:':>{pad}} {locs['residual_abs_sum'] / diag_steps:.5f}\n"""
+
         log_string += ep_string
         log_string += (
             f"""{'-' * width}\n"""
@@ -469,6 +504,12 @@ class AmpOnPolicyRunner:
             saved_dict["obs_norm_state_dict"] = self.obs_normalizer.state_dict()
             saved_dict["privileged_obs_norm_state_dict"] = self.privileged_obs_normalizer.state_dict()
 
+        if getattr(self.alg, "stop_actor_anchor", None) is not None:
+            saved_dict["stop_anchor"] = {
+                "state_dict": self.alg.stop_actor_anchor.state_dict(),
+                "observation_indices": self.alg.stop_anchor_indices,
+                "coefficient": self.alg.stop_anchor_coef,
+            }
         # save model
         torch.save(saved_dict, path)
 
@@ -482,6 +523,13 @@ class AmpOnPolicyRunner:
         resumed_training = self.alg.policy.load_state_dict(loaded_dict["model_state_dict"])
         self.alg.discriminator.load_state_dict(loaded_dict["discriminator_state_dict"])
         self.alg.amp_normalizer = loaded_dict["amp_normalizer"]
+        if "stop_anchor" in loaded_dict:
+            anchor = loaded_dict["stop_anchor"]
+            self.alg.set_stop_actor_anchor(self.alg.policy.actor, anchor["observation_indices"], anchor["coefficient"])
+            anchor_state = dict(anchor["state_dict"])
+            if hasattr(self.alg.stop_actor_anchor, "stopping_phase_index"):
+                anchor_state.setdefault("stopping_phase_index", torch.tensor(-1, device=self.device))
+            self.alg.stop_actor_anchor.load_state_dict(anchor_state)
         # -- Load RND model if used
         if self.alg.rnd:
             self.alg.rnd.load_state_dict(loaded_dict["rnd_state_dict"])
@@ -498,12 +546,14 @@ class AmpOnPolicyRunner:
                 # is not loaded, as the observation space could differ from the previous rl training.
                 self.privileged_obs_normalizer.load_state_dict(loaded_dict["obs_norm_state_dict"])
         # -- load optimizer if used
-        if load_optimizer and resumed_training:
+        if load_optimizer and resumed_training and not getattr(self.alg.policy, "reset_optimizer_on_load", False):
             # -- algorithm optimizer
             self.alg.optimizer.load_state_dict(loaded_dict["optimizer_state_dict"])
             # -- RND optimizer if used
             if self.alg.rnd:
                 self.alg.rnd_optimizer.load_state_dict(loaded_dict["rnd_optimizer_state_dict"])
+        elif load_optimizer and getattr(self.alg.policy, "reset_optimizer_on_load", False):
+            print("[INFO] Stair observation coordinates changed; optimizer initialized fresh, loaded actions preserved.")
         # -- load current learning iteration
         if resumed_training:
             self.current_learning_iteration = loaded_dict["iter"]

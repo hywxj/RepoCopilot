@@ -50,38 +50,38 @@ ELF3LITE_CFG = ArticulationCfg(
         ),
     ),
     init_state=ArticulationCfg.InitialStateCfg(
-        pos=(0.0, 0.0, 1.05),
+        pos=(0.0, 0.0, 1.08),
         joint_pos={
             "waist_y_joint": 0.0,
             "waist_x_joint": 0.0,
             "waist_z_joint": 0.0,
 
-            "l_hip_y_joint": -0.3,   # 左腿_髋关节_z轴
+            "l_hip_y_joint": -0.22,   # 左腿_髋关节_z轴
             "l_hip_x_joint": 0.0,   # 左腿_髋关节_x轴
             "l_hip_z_joint": 0.0,   # 左腿_髋关节_y轴
-            "l_knee_y_joint": 0.6,   # 左腿_膝关节_y轴
-            "l_ankle_y_joint": -0.3,   # 左腿_踝关节_y轴
+            "l_knee_y_joint": 0.44,   # 左腿_膝关节_y轴
+            "l_ankle_y_joint": -0.22,   # 左腿_踝关节_y轴
             "l_ankle_x_joint": 0.0,   # 左腿_踝关节_x轴
 
-            "r_hip_y_joint": -0.3,   # 右腿_髋关节_z轴    
+            "r_hip_y_joint": -0.22,   # 右腿_髋关节_z轴
             "r_hip_x_joint": 0.0,   # 右腿_髋关节_x轴
             "r_hip_z_joint": 0.0,   # 右腿_髋关节_y轴
-            "r_knee_y_joint": 0.6,   # 右腿_膝关节_y轴
-            "r_ankle_y_joint": -0.3,   # 右腿_踝关节_y轴
+            "r_knee_y_joint": 0.44,   # 右腿_膝关节_y轴
+            "r_ankle_y_joint": -0.22,   # 右腿_踝关节_y轴
             "r_ankle_x_joint": 0.0,   # 右腿_踝关节_x轴
 
             "l_shoulder_y_joint": 0.2,   # 左臂_肩关节_y轴
-            "l_shoulder_x_joint": 0.2,   # 左臂_肩关节_x轴
+            "l_shoulder_x_joint": 0.035,   # 左臂_肩关节_x轴
             "l_shoulder_z_joint": 0.0,   # 左臂_肩关节_z轴
-            "l_elbow_y_joint": 0.6,   # 左臂_肘关节_y轴
+            "l_elbow_y_joint": 0.30,   # 左臂_肘关节_y轴
             "l_wrist_x_joint": 0.0,
             "l_wrist_y_joint": 0.0,
             "l_wrist_z_joint": 0.0,
 
             "r_shoulder_y_joint": 0.2,   # 右臂_肩关节_y轴   
-            "r_shoulder_x_joint": -0.2,   # 右臂_肩关节_x轴
+            "r_shoulder_x_joint": -0.035,   # 右臂_肩关节_x轴
             "r_shoulder_z_joint": 0.0,   # 右臂_肩关节_z轴
-            "r_elbow_y_joint": 0.6,    # 右臂_肘关节_y轴
+            "r_elbow_y_joint": 0.30,    # 右臂_肘关节_y轴
             "r_wrist_x_joint": 0.0,
             "r_wrist_y_joint": 0.0,
             "r_wrist_z_joint": 0.0,
@@ -112,8 +112,8 @@ ELF3LITE_CFG = ArticulationCfg(
                 "waist_z_joint": 176.421,
             },
             damping={
-                "waist_y_joint": 6.904,
-                "waist_x_joint": 10.356,
+                "waist_y_joint": 7.8,
+                "waist_x_joint": 11.8,
                 "waist_z_joint": 11.231,
             },
         ),
@@ -125,28 +125,28 @@ ELF3LITE_CFG = ArticulationCfg(
                 ".*_knee_y_joint",   # 左腿_膝关节_y轴
             ],
             effort_limit_sim={
-                ".*_hip_y_joint": 100,
-                ".*_hip_x_joint": 100,
-                ".*_hip_z_joint": 50,
-                ".*_knee_y_joint": 150,
+                ".*_hip_y_joint": 130,
+                ".*_hip_x_joint": 120,
+                ".*_hip_z_joint": 70,
+                ".*_knee_y_joint": 190,
             },
             velocity_limit_sim={
-                ".*_hip_y_joint": 20,   # 左腿_髋关节_z轴
-                ".*_hip_x_joint": 20,   # 左腿_髋关节_x轴
-                ".*_hip_z_joint": 20,   # 左腿_髋关节_y轴
-                ".*_knee_y_joint": 20,   # 左腿_膝关节_y轴
+                ".*_hip_y_joint": 28,   # 左腿_髋关节_z轴
+                ".*_hip_x_joint": 25,   # 左腿_髋关节_x轴
+                ".*_hip_z_joint": 25,   # 左腿_髋关节_y轴
+                ".*_knee_y_joint": 30,   # 左腿_膝关节_y轴
             },
             stiffness={
-                ".*_hip_y_joint": 176.421,   # 左腿_髋关节_z轴
-                ".*_hip_x_joint": 176.421,   # 左腿_髋关节_x轴
-                ".*_hip_z_joint": 54.224,   # 左腿_髋关节_y轴
-                ".*_knee_y_joint": 176.421,   # 左腿_膝关节_y轴
+                ".*_hip_y_joint": 175.0,   # 左腿_髋关节_z轴
+                ".*_hip_x_joint": 165.0,   # 左腿_髋关节_x轴
+                ".*_hip_z_joint": 70.0,   # 左腿_髋关节_y轴
+                ".*_knee_y_joint": 205.0,   # 左腿_膝关节_y轴
             },
             damping={
-                ".*_hip_y_joint": 11.231,   # 左腿_髋关节_z轴
-                ".*_hip_x_joint": 11.231,   # 左腿_髋关节_x轴
-                ".*_hip_z_joint": 3.452,   # 左腿_髋关节_y轴
-                ".*_knee_y_joint": 11.231,   # 左腿_膝关节_y轴
+                ".*_hip_y_joint": 8.0,   # 左腿_髋关节_z轴
+                ".*_hip_x_joint": 9.5,   # 左腿_髋关节_x轴
+                ".*_hip_z_joint": 4.2,   # 左腿_髋关节_y轴
+                ".*_knee_y_joint": 8.0,   # 左腿_膝关节_y轴
             },
         ),
         "feet": ImplicitActuatorCfg(
@@ -155,20 +155,20 @@ ELF3LITE_CFG = ArticulationCfg(
                 ".*_ankle_x_joint",   # 左腿_踝关节_x轴
             ],
             effort_limit_sim={
-                ".*_ankle_y_joint": 50,
-                ".*_ankle_x_joint": 20,
+                ".*_ankle_y_joint": 70,
+                ".*_ankle_x_joint": 30,
             },
             velocity_limit_sim={
-                ".*_ankle_y_joint": 20,   # 左腿_踝关节_y轴
-                ".*_ankle_x_joint": 20,   # 左腿_踝关节_x轴
+                ".*_ankle_y_joint": 30,   # 左腿_踝关节_y轴
+                ".*_ankle_x_joint": 25,   # 左腿_踝关节_x轴
             },
             stiffness={
-                ".*_ankle_y_joint": 33.493,   # 左腿_踝关节_y轴
-                ".*_ankle_x_joint": 21.771,   # 左腿_踝关节_x轴
+                ".*_ankle_y_joint": 55.0,   # 左腿_踝关节_y轴
+                ".*_ankle_x_joint": 30.0,   # 左腿_踝关节_x轴
             },
             damping={
-                ".*_ankle_y_joint": 2.132,   # 左腿_踝关节_y轴
-                ".*_ankle_x_joint": 1.386,   # 左腿_踝关节_x轴
+                ".*_ankle_y_joint": 3.5,   # 左腿_踝关节_y轴
+                ".*_ankle_x_joint": 2.5,   # 左腿_踝关节_x轴
             },
         ),
         "arms": ImplicitActuatorCfg(
@@ -179,28 +179,28 @@ ELF3LITE_CFG = ArticulationCfg(
                 ".*_elbow_y_joint",   # 左臂_肘关节_y轴
             ],
             effort_limit_sim={
-                ".*_shoulder_y_joint": 50,   # 左臂_肩关节_y轴
+                ".*_shoulder_y_joint": 60,   # 左臂_肩关节_y轴
                 ".*_shoulder_x_joint": 50,   # 左臂_肩关节_x轴
                 ".*_shoulder_z_joint": 25,   # 左臂_肩关节_z轴
-                ".*_elbow_y_joint": 50,   # 左臂_肘关节_y轴
+                ".*_elbow_y_joint": 60,   # 左臂_肘关节_y轴
             },
             velocity_limit_sim={
-                ".*_shoulder_y_joint": 20,   # 左臂_肩关节_y轴
+                ".*_shoulder_y_joint": 25,   # 左臂_肩关节_y轴
                 ".*_shoulder_x_joint": 20,   # 左臂_肩关节_x轴
                 ".*_shoulder_z_joint": 20,   # 左臂_肩关节_z轴
-                ".*_elbow_y_joint": 20,   # 左臂_肘关节_y轴
+                ".*_elbow_y_joint": 25,   # 左臂_肘关节_y轴
             },
             stiffness={
-                ".*_shoulder_y_joint": 54.224,   # 左臂_肩关节_y轴
-                ".*_shoulder_x_joint": 54.224,   # 左臂_肩关节_x轴
-                ".*_shoulder_z_joint": 16.747,   # 左臂_肩关节_z轴
-                ".*_elbow_y_joint": 54.224,   # 左臂_肘关节_y轴
+                ".*_shoulder_y_joint": 48.0,   # 左臂_肩关节_y轴
+                ".*_shoulder_x_joint": 74.0,   # 左臂_肩关节_x轴
+                ".*_shoulder_z_joint": 30.0,   # 左臂_肩关节_z轴
+                ".*_elbow_y_joint": 42.0,   # 左臂_肘关节_y轴
             },
             damping={
-                ".*_shoulder_y_joint": 3.452,   # 左臂_肩关节_y轴
-                ".*_shoulder_x_joint": 3.452,   # 左臂_肩关节_x轴
-                ".*_shoulder_z_joint": 1.066,   # 左臂_肩关节_z轴
-                ".*_elbow_y_joint": 3.452,   # 左臂_肘关节_y轴
+                ".*_shoulder_y_joint": 2.6,   # 左臂_肩关节_y轴
+                ".*_shoulder_x_joint": 4.6,   # 左臂_肩关节_x轴
+                ".*_shoulder_z_joint": 2.2,   # 左臂_肩关节_z轴
+                ".*_elbow_y_joint": 2.4,   # 左臂_肘关节_y轴
             },
         ),
         "wrist": ImplicitActuatorCfg(

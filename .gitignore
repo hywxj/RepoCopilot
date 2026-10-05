@@ -11,3 +11,9 @@ legged_lab/envs/elf3/datasets/motion_visualization/elf3_bmlrub_walk_gmr/
 .env
 .env.*
 !.env.example
+
+# Large source archives
+*.tar.gz
+*.zip
+.venv/
+venv/

@@ -38,6 +38,7 @@ class RolloutStorage:
             self.action_sigma = None
             self.hidden_states = None
             self.rnd_state = None
+            self.stair_teacher_actions = None
 
         def clear(self):
             self.__init__()
@@ -98,6 +99,7 @@ class RolloutStorage:
 
         # counter for the number of transitions stored
         self.step = 0
+        self.stair_teacher_actions = None
 
     def add_transitions(self, transition: Transition):
         # check if the transition is valid
@@ -111,6 +113,13 @@ class RolloutStorage:
         self.actions[self.step].copy_(transition.actions)
         self.rewards[self.step].copy_(transition.rewards.view(-1, 1))
         self.dones[self.step].copy_(transition.dones.view(-1, 1))
+        if transition.stair_teacher_actions is not None:
+            if self.stair_teacher_actions is None:
+                self.stair_teacher_actions = torch.zeros(
+                    self.num_transitions_per_env, self.num_envs, transition.stair_teacher_actions.shape[-1], device=self.device)
+            self.stair_teacher_actions[self.step].copy_(transition.stair_teacher_actions)
+        elif self.stair_teacher_actions is not None:
+            self.stair_teacher_actions[self.step].zero_()
 
         # for distillation
         if self.training_type == "distillation":
@@ -250,10 +259,13 @@ class RolloutStorage:
                     rnd_state_batch = None
 
                 # yield the mini-batch
-                yield obs_batch, privileged_observations_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (
+                batch = (obs_batch, privileged_observations_batch, actions_batch, target_values_batch, advantages_batch, returns_batch, old_actions_log_prob_batch, old_mu_batch, old_sigma_batch, (
                     None,
                     None,
-                ), None, rnd_state_batch
+                ), None, rnd_state_batch)
+                if self.stair_teacher_actions is not None:
+                    batch += (self.stair_teacher_actions.flatten(0, 1)[batch_idx],)
+                yield batch
 
     # for reinfrocement learning with recurrent networks
     def recurrent_mini_batch_generator(self, num_mini_batches, num_epochs=8):

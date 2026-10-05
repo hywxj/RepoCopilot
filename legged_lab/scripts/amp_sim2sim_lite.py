@@ -83,6 +83,13 @@ class MujocoRunner:
 
         # self.policy = torch.jit.load(network_path)
         self.policy = ort.InferenceSession(network_path)
+        input_shape = self.policy.get_inputs()[0].shape
+        expected_obs = self.cfg.sim.num_obs_per_step * self.cfg.sim.actor_obs_history_length
+        if len(input_shape) != 2 or input_shape[-1] != expected_obs:
+            raise ValueError(
+                f"This MuJoCo runner supports only the {expected_obs}-D blind actor, got {input_shape}. "
+                "Geometry policies require a depth pipeline and step supervisor; do not pad observations."
+            )
         self.data = mujoco.MjData(self.model)
         self.viewer = mujoco_viewer.MujocoViewer(self.model, self.data)
         self.viewer._render_every_frame = False

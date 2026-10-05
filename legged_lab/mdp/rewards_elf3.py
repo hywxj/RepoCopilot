@@ -26,10 +26,37 @@ import math
 from isaaclab.assets import Articulation
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import ContactSensor
+from legged_lab.perception.stair_geometry import (
+    centered_tread_support,
+    match_sole_to_treads,
+    unsafe_tread_touchdown,
+)
+from legged_lab.perception.foothold_control import (
+    capture_point_offset,
+    confirmed_support_transition,
+    nonfoot_collision_risk,
+    standing_support_quality as _standing_support_quality,
+    verified_stair_progress_transition,
+)
 
 if TYPE_CHECKING:
     from legged_lab.envs.base.base_env import BaseEnv
     from legged_lab.envs.elf3.elf3_env import Elf3Env
+
+
+def standing_support_quality(
+    env: BaseEnv | Elf3Env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Use simulation contacts as reward labels, never as actor observations."""
+    data = env.scene[asset_cfg.name].data
+    forces = env.scene.sensors[sensor_cfg.name].data.net_forces_w[:, sensor_cfg.body_ids]
+    quat = data.body_quat_w[:, asset_cfg.body_ids]
+    offset = torch.tensor([0.03, 0.0, -0.04], device=env.device).expand(*quat.shape[:-1], 3)
+    offset_w = math_utils.quat_apply(quat, offset)
+    velocity = data.body_link_lin_vel_w[:, asset_cfg.body_ids] + torch.cross(
+        data.body_ang_vel_w[:, asset_cfg.body_ids], offset_w, dim=-1,
+    )
+    return _standing_support_quality(forces, velocity, env.standing_body_weight)
 
 
 def track_lin_vel_xy_yaw_frame_exp(
@@ -86,6 +113,101 @@ def track_ang_vel_z_world_exp(
     # 使用指数衰减函数
     # return torch.exp(-ang_vel_error / std**2) * (zero_flag)
     return torch.exp(-ang_vel_error / std**2) 
+
+
+def course_centerline_l2(
+    env: BaseEnv | Elf3Env,
+    lane_half_width: float = 1.5,
+    deadband: float = 0.05,
+    max_penalty: float = 4.0,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize lateral drift from each environment's course centerline."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    lateral_error = torch.abs(asset.data.root_pos_w[:, 1] - env.scene.env_origins[:, 1])
+    normalized_error = torch.clamp(lateral_error - deadband, min=0.0) / max(lane_half_width, 1.0e-6)
+    return torch.clamp(torch.square(normalized_error), max=max_penalty)
+
+
+def course_heading_exp(
+    env: BaseEnv | Elf3Env,
+    std: float = 0.35,
+    target_yaw: float = 0.0,
+    command_threshold: float = 0.05,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward alignment with the course's positive x direction while moving."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    quat = asset.data.root_quat_w
+    qw, qx, qy, qz = quat[:, 0], quat[:, 1], quat[:, 2], quat[:, 3]
+    yaw = torch.atan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy * qy + qz * qz))
+    yaw_error = math_utils.wrap_to_pi(yaw - target_yaw)
+    moving = torch.abs(env.command_generator.command[:, 0]) > command_threshold
+    return torch.exp(-torch.square(yaw_error) / std**2) * moving.float()
+
+
+def course_heading_l2(
+    env: BaseEnv | Elf3Env,
+    std: float = 0.35,
+    command_threshold: float = 0.12,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Provide a dense, bounded penalty for turning away from the route."""
+
+    asset: Articulation = env.scene[asset_cfg.name]
+    quat = asset.data.root_quat_w
+    qw, qx, qy, qz = quat[:, 0], quat[:, 1], quat[:, 2], quat[:, 3]
+    yaw = torch.atan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy * qy + qz * qz))
+    yaw_error = math_utils.wrap_to_pi(yaw)
+    moving = torch.abs(env.command_generator.command[:, 0]) > command_threshold
+    normalized = torch.clamp(yaw_error / max(std, 1.0e-6), min=-3.0, max=3.0)
+    return torch.square(normalized) * moving.float()
+
+
+def course_lateral_velocity_l2(
+    env: BaseEnv | Elf3Env,
+    std: float = 0.25,
+    command_threshold: float = 0.12,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize sideways velocity while the route command is active.
+
+    Position-only centerline rewards arrive too late to stop a drift on a
+    stair riser. This term supplies the residual policy with a dense damping
+    signal while leaving standing and commanded turns unaffected.
+    """
+
+    asset: Articulation = env.scene[asset_cfg.name]
+    moving = torch.abs(env.command_generator.command[:, 0]) > command_threshold
+    lateral_velocity = asset.data.root_lin_vel_w[:, 1]
+    return torch.square(lateral_velocity / max(std, 1.0e-6)) * moving.float()
+
+
+def foothold_target_alignment_exp(
+    env: Elf3Env,
+    sensor_cfg: SceneEntityCfg,
+    std: float = 0.12,
+    target_offset: float = 0.03,
+    command_threshold: float = 0.12,
+) -> torch.Tensor:
+    """Guide swing feet onto detected tread centers, not just toward them."""
+
+    if not hasattr(env, "_foothold_target_features") or not hasattr(env, "stair_mode"):
+        return torch.zeros(env.num_envs, device=env.device)
+    features = env._foothold_target_features().reshape(env.num_envs, -1, 4)
+    geometry_cfg = env.cfg.scene.depth_camera.geometry
+    target_dx = features[..., 0] * (
+        geometry_cfg.foothold_target_distance_scale or geometry_cfg.max_forward
+    )
+    confidence = features[..., 3]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    contact_forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :]
+    contact = torch.norm(contact_forces, dim=-1).amax(dim=1) > 1.0
+    moving = torch.abs(env.command_generator.command[:, 0:1]) > command_threshold
+    active = moving & ~contact & (confidence > 0.25)
+    target_error = target_dx - target_offset
+    score = torch.exp(-torch.square(target_error) / max(std, 1.0e-6) ** 2) * confidence
+    return (score * active.float()).sum(dim=1) / active.float().sum(dim=1).clamp_min(1.0)
 
 
 def lin_vel_z_l2(env: BaseEnv | Elf3Env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
@@ -171,7 +293,12 @@ def action_rate_l2(env: BaseEnv | Elf3Env) -> torch.Tensor:
         dim=1,
     )
 
-def action_smoothness(env: BaseEnv | Elf3Env) -> torch.Tensor:
+def action_smoothness(
+    env: BaseEnv | Elf3Env,
+    first_order_scale: float = 1.0,
+    second_order_scale: float = 1.0,
+    action_magnitude_scale: float = 0.05,
+) -> torch.Tensor:
     # Get the action buffer from the environment (stores the most recent series of actions)
     buf = env.action_buffer._circular_buffer.buffer
     
@@ -181,9 +308,9 @@ def action_smoothness(env: BaseEnv | Elf3Env) -> torch.Tensor:
     a_t2  = buf[:, -3, :]   # 上上时刻动作
     
     # 计算三个平滑度指标：
-    term_1 = torch.sum((a_t - a_t1)**2, dim=1)  # 相邻动作变化幅度（一阶差分）
-    term_2 = torch.sum((a_t + a_t2 - 2*a_t1)**2, dim=1)  # 动作加速度（二阶差分）
-    term_3 = 0.05 * torch.sum(torch.abs(a_t), dim=1)  # 动作幅度的正则化项
+    term_1 = first_order_scale * torch.sum((a_t - a_t1)**2, dim=1)  # 相邻动作变化幅度（一阶差分）
+    term_2 = second_order_scale * torch.sum((a_t + a_t2 - 2*a_t1)**2, dim=1)  # 动作加速度（二阶差分）
+    term_3 = action_magnitude_scale * torch.sum(torch.abs(a_t), dim=1)  # 动作幅度的正则化项
     
     # 返回总平滑度得分（值越小表示动作越平滑）
     return term_1 + term_2 + term_3
@@ -289,6 +416,92 @@ def is_terminated(env: BaseEnv | Elf3Env) -> torch.Tensor:
         torch.Tensor: Early termination penalty flag, shape [num_envs]
     """
     return env.reset_buf * ~env.time_out_buf
+
+
+def stair_failure_termination(env: Elf3Env) -> torch.Tensor:
+    """Keep a successful stair finish out of the fall/violation penalty."""
+
+    terminated = env.reset_buf & ~env.time_out_buf
+    if hasattr(env, "last_goal_reached"):
+        terminated = terminated & ~env.last_goal_reached
+    return terminated.float()
+
+
+def stair_goal_completion(env: Elf3Env) -> torch.Tensor:
+    if hasattr(env, "last_goal_reached"):
+        return env.last_goal_reached.float()
+    return torch.zeros(env.num_envs, device=env.device)
+
+
+def stair_step_progress(env: Elf3Env) -> torch.Tensor:
+    if hasattr(env, "stair_progress_increment"):
+        return env.stair_progress_increment
+    return torch.zeros(env.num_envs, device=env.device)
+
+
+def stair_physical_step_coverage(env: Elf3Env) -> torch.Tensor:
+    """Credit each physical stair level only after centered stable foot support."""
+
+    if hasattr(env, "stair_physical_step_increment"):
+        return env.stair_physical_step_increment
+    return torch.zeros(env.num_envs, device=env.device)
+
+
+def verified_stair_step_progress(env: Elf3Env) -> torch.Tensor:
+    """Credit only a confirmed tread landing at the next stair height."""
+
+    if not hasattr(env, "stair_verified_progress_level"):
+        return torch.zeros(env.num_envs, device=env.device)
+    if getattr(env, "safe_tread_evaluated_step", -1) != env.sim_step_counter:
+        raise RuntimeError("safe_tread_landing must run before verified_stair_step_progress")
+    descending = env.cfg.scene.depth_camera.geometry.bootstrap_stair_row == 2
+    verified, increment = verified_stair_progress_transition(
+        env.stair_progress_level,
+        env.stair_verified_progress_level,
+        env.safe_tread_confirmed_touchdown,
+        env.safe_tread_confirmed_tread_height,
+        env.scene.env_origins[:, 2],
+        env.stair_step_height,
+        direction=-1 if descending else 1,
+    )
+    env.stair_verified_progress_level = verified
+    env.stair_verified_contact_count += increment.long()
+    return increment
+
+
+def unsafe_tread_first_contact(env: Elf3Env) -> torch.Tensor:
+    """Penalize an edge or wall touchdown before it becomes a fall."""
+
+    if not hasattr(env, "safe_tread_unsafe_first_contact"):
+        return torch.zeros(env.num_envs, device=env.device)
+    if getattr(env, "safe_tread_evaluated_step", -1) != env.sim_step_counter:
+        raise RuntimeError("safe_tread_landing must run before unsafe_tread_first_contact")
+    return env.safe_tread_unsafe_first_contact.float().sum(dim=1)
+
+
+def stair_hip_clearance_deficit(env: Elf3Env, min_clearance: float = 0.45) -> torch.Tensor:
+    """Provide early feedback when the hips sink toward the supported stair."""
+
+    if not hasattr(env, "stair_mode") or not hasattr(env, "_hip_clearance_above_support"):
+        return torch.zeros(env.num_envs, device=env.device)
+    contacts = env.contact_sensor.data.net_forces_w[:, env.feet_cfg.body_ids, 2] > 5.0
+    active = (env.stair_mode != 0) & contacts.any(dim=1)
+    return (min_clearance - env._hip_clearance_above_support()).clamp_min(0.0) * active
+
+
+def stair_nonfoot_collision_risk(
+    env: Elf3Env,
+    threshold: float = 20.0,
+    force_span: float = 300.0,
+) -> torch.Tensor:
+    """Penalize an incipient body impact while the depth gate sees stairs."""
+
+    if not hasattr(env, "stair_mode"):
+        return torch.zeros(env.num_envs, device=env.device)
+    force = env.contact_sensor.data.net_forces_w_history[
+        :, :, env.termination_contact_cfg.body_ids, :
+    ]
+    return nonfoot_collision_risk(force, threshold, force_span) * (env.stair_mode != 0)
 
 
 def feet_air_time_positive_biped(
@@ -481,7 +694,7 @@ def feet_stumble(env: BaseEnv | Elf3Env, sensor_cfg: SceneEntityCfg) -> torch.Te
 def feet_too_near_humanoid(
     env: BaseEnv | Elf3Env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"), threshold: float = 0.27
 ) -> torch.Tensor:
-    """惩罚两脚距离过近（人形机器人专用）。
+    """Penalize insufficient lateral foot separation in the robot frame.
     
     防止双脚交叉或距离过近导致的不稳定步态。
     
@@ -495,12 +708,34 @@ def feet_too_near_humanoid(
     """
     assert len(asset_cfg.body_ids) == 2  # 必须指定两只脚
     asset: Articulation = env.scene[asset_cfg.name]
-    # 获取双脚的世界坐标位置
-    feet_pos = asset.data.body_pos_w[:, asset_cfg.body_ids, :]
-    # 计算双脚之间的距离
-    distance = torch.norm(feet_pos[:, 0] - feet_pos[:, 1], dim=-1)
-    # 距离小于阈值时给予惩罚
-    return (threshold - distance).clamp(min=0)
+    feet_pos_w = asset.data.body_pos_w[:, asset_cfg.body_ids, :]
+    feet_rel_w = feet_pos_w - asset.data.root_link_pos_w[:, None, :]
+    num_envs, num_feet = feet_rel_w.shape[:2]
+    root_quat_inv = math_utils.quat_conjugate(asset.data.root_link_quat_w)
+    root_quat_inv = root_quat_inv[:, None, :].expand(num_envs, num_feet, 4).reshape(-1, 4)
+    feet_pos_b = math_utils.quat_apply(root_quat_inv, feet_rel_w.reshape(-1, 3)).reshape(num_envs, num_feet, 3)
+
+    lateral_separation = feet_pos_b[:, 0, 1] - feet_pos_b[:, 1, 1]
+    return (threshold - lateral_separation).clamp(min=0)
+
+
+def stance_foot_ang_vel_l2(
+    env: BaseEnv | Elf3Env,
+    sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Penalize support-foot rocking after contact on uneven terrain."""
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    contact_forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :]
+    contacts = torch.norm(contact_forces, dim=-1).max(dim=1)[0] > 1.0
+    foot_ang_vel = asset.data.body_ang_vel_w[:, asset_cfg.body_ids, :]
+
+    support = contacts.float()
+    support_count = support.sum(dim=1).clamp_min(1.0)
+    roll_pitch_speed = torch.sum(torch.square(foot_ang_vel[:, :, :2]), dim=-1)
+    return torch.sum(roll_pitch_speed * support, dim=1) / support_count
 
 
 # ==================== Elf3特定奖励函数（针对类人机器人）====================
@@ -563,31 +798,80 @@ def hip_yaw_action(env: Elf3Env) -> torch.Tensor:
     return torch.sum(torch.abs(env.action[:, [env.left_leg_ids[2], env.right_leg_ids[2]]]), dim=1)
 
 
-def feet_y_distance(env: Elf3Env) -> torch.Tensor:
-    """惩罚脚部Y方向距离偏差（当Y向速度较小时）。
-    
-    保持双脚在侧向的适当距离，防止步宽过窄或过宽。
-    
-    参数:
-        env: Elf3Env实例
-        
-    返回:
-        torch.Tensor: 脚部Y距离偏差惩罚，形状为[num_envs]
-    """
-    # 计算双脚相对于身体的位置
+def feet_y_distance(
+    env: Elf3Env,
+    target_width: float = 0.31,
+    yaw_width_gain: float = 0.035,
+    max_extra_width: float = 0.035,
+    y_vel_threshold: float = 0.1,
+) -> torch.Tensor:
+    """Penalize lateral foot-width error, with a slightly wider target while turning."""
     leftfoot = env.robot.data.body_pos_w[:, env.feet_body_ids[0], :] - env.robot.data.root_link_pos_w[:, :]
     rightfoot = env.robot.data.body_pos_w[:, env.feet_body_ids[1], :] - env.robot.data.root_link_pos_w[:, :]
-    # 转换到身体坐标系
     leftfoot_b = math_utils.quat_apply(math_utils.quat_conjugate(env.robot.data.root_link_quat_w[:, :]), leftfoot)
     rightfoot_b = math_utils.quat_apply(math_utils.quat_conjugate(env.robot.data.root_link_quat_w[:, :]), rightfoot)
-    # 计算Y方向距离与期望值（0.299）的偏差
-    y_distance_b = torch.abs(leftfoot_b[:, 1] - rightfoot_b[:, 1] - 0.299)
-    # 只在Y向速度较小时生效
-    y_vel_flag = torch.abs(env.command_generator.command[:, 1]) < 0.1
+
+    yaw_extra = torch.clamp(torch.abs(env.command_generator.command[:, 2]) * yaw_width_gain, max=max_extra_width)
+    target = target_width + yaw_extra
+    y_distance_b = torch.abs(torch.abs(leftfoot_b[:, 1] - rightfoot_b[:, 1]) - target)
+    y_vel_flag = torch.abs(env.command_generator.command[:, 1]) < y_vel_threshold
     return y_distance_b * y_vel_flag
 
 
 # ==================== 步态周期性奖励函数 ===================
+
+def fast_walk_height(
+    env: BaseEnv | Elf3Env,
+    sensor_cfg: SceneEntityCfg,
+    target_height: float = 0.98,
+    std: float = 0.08,
+    speed_threshold: float = 0.75,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward torso height relative to the supporting feet while moving forward."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+
+    contact_forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :]
+    contacts = torch.norm(contact_forces, dim=-1).max(dim=1)[0] > 1.0
+    feet_z = asset.data.body_pos_w[:, asset_cfg.body_ids, 2]
+    support_count = contacts.sum(dim=1)
+    support_z = torch.sum(feet_z * contacts.float(), dim=1) / support_count.clamp_min(1)
+
+    cmd_x = env.command_generator.command[:, 0]
+    fast = cmd_x > speed_threshold
+    height = asset.data.root_link_pos_w[:, 2] - support_z
+    deficit = torch.clamp(target_height - height, min=0.0)
+    score = torch.exp(-torch.square(deficit) / std**2)
+    has_support = support_count > 0
+    return score * fast.float() * has_support.float()
+
+
+def stance_knee_extension(
+    env: BaseEnv | Elf3Env,
+    sensor_cfg: SceneEntityCfg,
+    max_knee: float = 0.62,
+    std: float = 0.08,
+    speed_threshold: float = 0.75,
+) -> torch.Tensor:
+    """Reward the stance knee for not over-flexing during fast forward walking."""
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    contact_forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :]
+    contacts = torch.norm(contact_forces, dim=-1).max(dim=1)[0] > 1.0
+
+    knee_ids = torch.tensor([env.left_leg_ids[3], env.right_leg_ids[3]], device=env.device)
+    knee_pos = env.robot.data.joint_pos[:, knee_ids]
+    over_flex = torch.clamp(knee_pos - max_knee, min=0.0)
+
+    support = contacts.float()
+    support_count = support.sum(dim=1).clamp_min(1.0)
+    error = torch.sum(torch.square(over_flex) * support, dim=1) / support_count
+    score = torch.exp(-error / std**2)
+
+    fast = env.command_generator.command[:, 0] > speed_threshold
+    has_support = support.sum(dim=1) > 0.0
+    return score * fast.float() * has_support.float()
+
 
 def gait_clock(phase, air_ratio, delta_t):
     """生成足部摆动和站立阶段的周期性步态时钟信号。
@@ -799,20 +1083,25 @@ def gait_feet_frc_support_perio_smooth(env: Elf3Env, delta_t: float = 0.02) -> t
 # ==================== 站立稳定性奖励函数 ===================
 
 def stand_still(
-    env: Elf3Env, command_threshold: float = 0.06, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+    env: Elf3Env,
+    command_threshold: float = 0.06,
+    yaw_command_weight: float = 0.5,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Penalize offsets from the default joint positions when the command is very small."""
+    """Penalize offsets from default joints only when all velocity commands are small."""
     command = env.command_generator.command
     asset: Articulation = env.scene[asset_cfg.name]
-    # Penalize motion when command is nearly zero.
     angle = asset.data.joint_pos[:, asset_cfg.joint_ids] - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+    command_magnitude = torch.norm(command[:, :2], dim=1) + yaw_command_weight * torch.abs(command[:, 2])
 
-    return torch.sum(torch.abs(angle), dim=1) * (torch.norm(command[:, :2], dim=1) < command_threshold)
+    return torch.sum(torch.abs(angle), dim=1) * (command_magnitude < command_threshold)
 
 def idle_when_commanded(
     env: Elf3Env,
     cmd_threshold: float = 0.2,
     vel_threshold: float = 0.1,
+    yaw_cmd_weight: float = 0.5,
+    yaw_vel_weight: float = 0.5,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
     """Penalize being idle when a velocity command is given.
@@ -843,21 +1132,228 @@ def idle_when_commanded(
     """
     asset: Articulation = env.scene[asset_cfg.name]
     
-    # 获取速度命令（xy 分量）
-    cmd_xy = env.command_generator.command[:, :2]
-    cmd_magnitude = torch.linalg.norm(cmd_xy, dim=-1)
+    # Linear and yaw commands both mean the robot should not stay idle.
+    command = env.command_generator.command
+    cmd_magnitude = torch.linalg.norm(command[:, :2], dim=-1) + yaw_cmd_weight * torch.abs(command[:, 2])
     
     # 获取实际根速度（偏航坐标系，与 track_lin_vel_xy 使用的相同）
     vel_yaw = math_utils.quat_rotate_inverse(
         math_utils.yaw_quat(asset.data.root_quat_w), asset.data.root_lin_vel_w[:, :3]
     )
-    vel_magnitude = torch.linalg.norm(vel_yaw[:, :2], dim=-1)
+    vel_magnitude = torch.linalg.norm(vel_yaw[:, :2], dim=-1) + yaw_vel_weight * torch.abs(
+        asset.data.root_ang_vel_w[:, 2]
+    )
     
     # 检测“已命令但空闲”状况
     is_commanded = cmd_magnitude > cmd_threshold  # Should be moving
     is_idle = vel_magnitude < vel_threshold       # But not moving
     
     return (is_commanded & is_idle).float()
+
+
+def forward_velocity_floor(
+    env: BaseEnv | Elf3Env,
+    ratio: float = 0.75,
+    std: float = 0.12,
+    command_threshold: float = 0.15,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Reward commanded forward motion for not dropping below a speed floor."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    vel_yaw = math_utils.quat_rotate_inverse(
+        math_utils.yaw_quat(asset.data.root_quat_w), asset.data.root_lin_vel_w[:, :3]
+    )
+    cmd_x = env.command_generator.command[:, 0]
+    target_floor = ratio * cmd_x
+    deficit = torch.clamp(target_floor - vel_yaw[:, 0], min=0.0)
+    score = torch.exp(-torch.square(deficit) / std**2)
+    moving_forward = cmd_x > command_threshold
+    return score * moving_forward
+
+
+def arm_swing_opposite_hips(
+    env: Elf3Env,
+    pos_gain: float = 0.6,
+    vel_gain: float = 0.5,
+    pos_std: float = 0.35,
+    vel_std: float = 1.5,
+    command_threshold: float = 0.15,
+) -> torch.Tensor:
+    """Reward human-like contralateral arm swing during locomotion.
+
+    The left shoulder pitch follows the right hip pitch, and the right shoulder
+    pitch follows the left hip pitch. This gives AMP a direct handle on arm
+    swing without forcing a fixed arm pose.
+    """
+    joint_pos = env.robot.data.joint_pos
+    joint_vel = env.robot.data.joint_vel
+    default_pos = env.robot.data.default_joint_pos
+
+    left_shoulder_id = env.left_arm_ids[0]
+    right_shoulder_id = env.right_arm_ids[0]
+    left_hip_id = env.left_leg_ids[0]
+    right_hip_id = env.right_leg_ids[0]
+
+    left_shoulder = joint_pos[:, left_shoulder_id] - default_pos[:, left_shoulder_id]
+    right_shoulder = joint_pos[:, right_shoulder_id] - default_pos[:, right_shoulder_id]
+    left_hip = joint_pos[:, left_hip_id] - default_pos[:, left_hip_id]
+    right_hip = joint_pos[:, right_hip_id] - default_pos[:, right_hip_id]
+
+    left_shoulder_vel = joint_vel[:, left_shoulder_id]
+    right_shoulder_vel = joint_vel[:, right_shoulder_id]
+    left_hip_vel = joint_vel[:, left_hip_id]
+    right_hip_vel = joint_vel[:, right_hip_id]
+
+    pos_error = torch.square(left_shoulder - pos_gain * right_hip) + torch.square(
+        right_shoulder - pos_gain * left_hip
+    )
+    vel_error = torch.square(left_shoulder_vel - vel_gain * right_hip_vel) + torch.square(
+        right_shoulder_vel - vel_gain * left_hip_vel
+    )
+
+    pos_score = torch.exp(-pos_error / pos_std**2)
+    vel_score = torch.exp(-vel_error / vel_std**2)
+    moving = torch.norm(env.command_generator.command[:, :2], dim=1) > command_threshold
+    return (0.7 * pos_score + 0.3 * vel_score) * moving
+
+
+def arm_swing_opposite_feet(
+    env: Elf3Env,
+    asset_cfg: SceneEntityCfg,
+    neutral_pitch: float = 0.0,
+    swing_gain: float = 0.28,
+    foot_delta_scale: float = 0.18,
+    pos_std: float = 0.24,
+    diff_std: float = 0.30,
+    command_threshold: float = 0.15,
+) -> torch.Tensor:
+    """Reward contralateral arm swing from the actual foot fore-aft phase.
+
+    When the left foot is ahead of the right foot, the right shoulder pitch is
+    rewarded for moving forward; when the right foot is ahead, the left shoulder
+    pitch is rewarded for moving forward. For ELF3, expert data shows forward
+    arm swing corresponds to a smaller shoulder_y value.
+    """
+    asset: Articulation = env.scene[asset_cfg.name]
+    joint_pos = env.robot.data.joint_pos
+
+    left_shoulder = joint_pos[:, env.left_arm_ids[0]]
+    right_shoulder = joint_pos[:, env.right_arm_ids[0]]
+
+    feet_pos_w = asset.data.body_pos_w[:, asset_cfg.body_ids, :]
+    feet_rel_w = feet_pos_w - asset.data.root_link_pos_w[:, None, :]
+    num_envs, num_feet = feet_rel_w.shape[:2]
+    root_quat_inv = math_utils.quat_conjugate(asset.data.root_link_quat_w)
+    root_quat_inv = root_quat_inv[:, None, :].expand(num_envs, num_feet, 4).reshape(-1, 4)
+    feet_pos_b = math_utils.quat_apply(root_quat_inv, feet_rel_w.reshape(-1, 3)).reshape(num_envs, num_feet, 3)
+
+    left_foot_x = feet_pos_b[:, 0, 0]
+    right_foot_x = feet_pos_b[:, 1, 0]
+    foot_phase = torch.tanh((left_foot_x - right_foot_x) / foot_delta_scale)
+
+    left_target = neutral_pitch + swing_gain * foot_phase
+    right_target = neutral_pitch - swing_gain * foot_phase
+    pos_error = torch.square(left_shoulder - left_target) + torch.square(right_shoulder - right_target)
+    pos_score = torch.exp(-pos_error / pos_std**2)
+
+    shoulder_diff_target = 2.0 * swing_gain * foot_phase
+    shoulder_diff = left_shoulder - right_shoulder
+    diff_score = torch.exp(-torch.square(shoulder_diff - shoulder_diff_target) / diff_std**2)
+
+    moving_command = torch.norm(env.command_generator.command[:, :2], dim=1) + 0.5 * torch.abs(
+        env.command_generator.command[:, 2]
+    )
+    moving = moving_command > command_threshold
+    return (0.75 * pos_score + 0.25 * diff_score) * moving
+
+
+def elbow_lateral_range(
+    env: BaseEnv | Elf3Env,
+    asset_cfg: SceneEntityCfg,
+    min_abs_y: float = 0.20,
+    max_abs_y: float = 0.30,
+    std: float = 0.04,
+    command_threshold: float = 0.0,
+) -> torch.Tensor:
+    """Reward elbows for staying in a natural lateral band around the torso."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    elbows_pos_w = asset.data.body_pos_w[:, asset_cfg.body_ids, :]
+    elbows_rel_w = elbows_pos_w - asset.data.root_link_pos_w[:, None, :]
+    num_envs, num_elbows = elbows_rel_w.shape[:2]
+    root_quat_inv = math_utils.quat_conjugate(asset.data.root_link_quat_w)
+    root_quat_inv = root_quat_inv[:, None, :].expand(num_envs, num_elbows, 4).reshape(-1, 4)
+    elbows_pos_b = math_utils.quat_apply(root_quat_inv, elbows_rel_w.reshape(-1, 3)).reshape(num_envs, num_elbows, 3)
+
+    abs_y = torch.abs(elbows_pos_b[:, :, 1])
+    low_error = torch.clamp(min_abs_y - abs_y, min=0.0)
+    high_error = torch.clamp(abs_y - max_abs_y, min=0.0)
+    score = torch.exp(-torch.sum(torch.square(low_error) + torch.square(high_error), dim=1) / std**2)
+
+    if command_threshold > 0.0:
+        moving_command = torch.norm(env.command_generator.command[:, :2], dim=1) + 0.5 * torch.abs(
+            env.command_generator.command[:, 2]
+        )
+        score = score * (moving_command > command_threshold)
+    return score
+
+
+def elbow_relaxed_motion(
+    env: BaseEnv | Elf3Env,
+    min_flexion: float = 0.15,
+    max_flexion: float = 1.25,
+    target_flexion: float = 0.95,
+    phase_gain: float = 0.0,
+    vel_gain: float = 0.35,
+    range_std: float = 0.25,
+    target_std: float = 0.45,
+    vel_std: float = 1.2,
+    activity_speed: float = 0.35,
+    command_threshold: float = 0.15,
+) -> torch.Tensor:
+    """Reward elbows that stay relaxed and move a little with shoulder swing."""
+    joint_pos = env.robot.data.joint_pos
+    joint_vel = env.robot.data.joint_vel
+
+    left_shoulder_id = env.left_arm_ids[0]
+    right_shoulder_id = env.right_arm_ids[0]
+    left_elbow_id = env.left_arm_ids[3]
+    right_elbow_id = env.right_arm_ids[3]
+
+    left_elbow = joint_pos[:, left_elbow_id]
+    right_elbow = joint_pos[:, right_elbow_id]
+    left_elbow_vel = joint_vel[:, left_elbow_id]
+    right_elbow_vel = joint_vel[:, right_elbow_id]
+    left_shoulder_vel = joint_vel[:, left_shoulder_id]
+    right_shoulder_vel = joint_vel[:, right_shoulder_id]
+
+    low_error = torch.square(torch.clamp(min_flexion - left_elbow, min=0.0)) + torch.square(
+        torch.clamp(min_flexion - right_elbow, min=0.0)
+    )
+    high_error = torch.square(torch.clamp(left_elbow - max_flexion, min=0.0)) + torch.square(
+        torch.clamp(right_elbow - max_flexion, min=0.0)
+    )
+    range_score = torch.exp(-(low_error + high_error) / range_std**2)
+
+    if phase_gain != 0.0 and hasattr(env, "gait_phase"):
+        left_target = target_flexion + phase_gain * torch.sin(2 * torch.pi * env.gait_phase[:, 1])
+        right_target = target_flexion + phase_gain * torch.sin(2 * torch.pi * env.gait_phase[:, 0])
+    else:
+        left_target = target_flexion
+        right_target = target_flexion
+
+    target_error = torch.square(left_elbow - left_target) + torch.square(right_elbow - right_target)
+    target_score = torch.exp(-target_error / target_std**2)
+
+    left_vel_error = torch.square(torch.abs(left_elbow_vel) - vel_gain * torch.abs(left_shoulder_vel))
+    right_vel_error = torch.square(torch.abs(right_elbow_vel) - vel_gain * torch.abs(right_shoulder_vel))
+    vel_score = torch.exp(-(left_vel_error + right_vel_error) / vel_std**2)
+    activity_score = torch.tanh((torch.abs(left_elbow_vel) + torch.abs(right_elbow_vel)) / (2 * activity_speed))
+
+    moving_command = torch.norm(env.command_generator.command[:, :2], dim=1) + 0.5 * torch.abs(
+        env.command_generator.command[:, 2]
+    )
+    moving = moving_command > command_threshold
+    return (0.15 * range_score + 0.30 * target_score + 0.35 * vel_score + 0.20 * activity_score) * moving
 
 # ======================== DWAQ Rewards ========================
 # These rewards are adapted from the DreamWaQ project for blind walking.
@@ -913,6 +1409,259 @@ def gait_phase_contact(
     
     return torch.sum(phase_match.float(), dim=-1)  # Sum over feet
 
+
+def feet_clearance_relative(
+    env: BaseEnv | Elf3Env,
+    sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg,
+    target_height: float = 0.16,
+    std: float = 0.05,
+    command_threshold: float = 0.15,
+) -> torch.Tensor:
+    """Reward swing-foot clearance relative to the currently supporting foot.
+
+    World-frame foot height is not suitable on stairs because the terrain
+    elevation changes. This term uses the contacted foot as the local ground
+    reference and only scores the other foot while the robot is commanded to
+    move.
+    """
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    contact_forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :]
+    contacts = torch.norm(contact_forces, dim=-1).max(dim=1)[0] > 1.0
+    feet_z = asset.data.body_pos_w[:, asset_cfg.body_ids, 2]
+
+    support_count = contacts.sum(dim=1, keepdim=True)
+    support_z = torch.sum(feet_z * contacts.float(), dim=1, keepdim=True) / support_count.clamp_min(1)
+    moving = torch.norm(env.command_generator.command[:, :2], dim=1, keepdim=True) > command_threshold
+    swing_mask = (~contacts) & (support_count > 0) & moving
+
+    clearance = feet_z - support_z
+    score = torch.exp(-torch.square(clearance - target_height) / std**2)
+    swing_count = swing_mask.sum(dim=1).clamp_min(1)
+    return torch.sum(score * swing_mask.float(), dim=1) / swing_count
+
+
+def swing_foot_forward_progress(
+    env: BaseEnv | Elf3Env,
+    sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg,
+    target_forward: float = 0.16,
+    std: float = 0.10,
+    command_threshold: float = 0.15,
+) -> torch.Tensor:
+    """Reward the swing foot for moving ahead of the support foot.
+
+    Clearance alone can produce a backward-kicking gait. This term measures foot
+    x-position in the robot body frame and rewards the swing foot when it moves
+    in the commanded travel direction relative to the stance foot.
+    """
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    contact_forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :]
+    contacts = torch.norm(contact_forces, dim=-1).max(dim=1)[0] > 1.0
+    feet_pos_w = asset.data.body_pos_w[:, asset_cfg.body_ids, :]
+
+    feet_rel_w = feet_pos_w - asset.data.root_link_pos_w[:, None, :]
+    num_envs, num_feet = feet_rel_w.shape[:2]
+    root_quat_inv = math_utils.quat_conjugate(asset.data.root_link_quat_w)
+    root_quat_inv = root_quat_inv[:, None, :].expand(num_envs, num_feet, 4).reshape(-1, 4)
+    feet_pos_b = math_utils.quat_apply(root_quat_inv, feet_rel_w.reshape(-1, 3)).reshape(num_envs, num_feet, 3)
+
+    support_count = contacts.sum(dim=1, keepdim=True)
+    support_x = torch.sum(feet_pos_b[:, :, 0] * contacts.float(), dim=1, keepdim=True) / support_count.clamp_min(1)
+
+    cmd_x = env.command_generator.command[:, 0:1]
+    direction = torch.sign(cmd_x)
+    moving = torch.abs(cmd_x) > command_threshold
+    swing_mask = (~contacts) & (support_count > 0) & moving
+
+    progress = direction * (feet_pos_b[:, :, 0] - support_x)
+    deficit = torch.clamp(target_forward - progress, min=0.0)
+    score = torch.exp(-torch.square(deficit) / std**2)
+    swing_count = swing_mask.sum(dim=1).clamp_min(1)
+    return torch.sum(score * swing_mask.float(), dim=1) / swing_count
+
+
+def safe_tread_landing(
+    env: BaseEnv | Elf3Env,
+    sensor_cfg: SceneEntityCfg,
+    asset_cfg: SceneEntityCfg,
+    edge_margin: float = 0.03,
+    foot_rear_extent: float = 0.074,
+    foot_front_extent: float = 0.132,
+    min_support_overlap: float = 0.04,
+    sole_bottom_offset: float = 0.04,
+    height_tolerance: float = 0.10,
+    touchdown_bonus: float = 1.0,
+    center_fraction: float = 0.0,
+    confirmation_frames: int = 3,
+    max_support_speed: float = 0.25,
+    min_support_vertical_ratio: float = 0.65,
+) -> torch.Tensor:
+    """Reward centered swing-foot overlap and confirmed tread support.
+
+    The ELF3 sole is longer than its 20 cm curriculum treads and the ankle-link
+    origin is not the sole center. Compare the actual fore-aft collision extent
+    with the safe tread interval, allowing realistic toe or heel overhang.
+    """
+
+    if not hasattr(env, "terrain_geometry") or env.terrain_geometry is None:
+        return torch.zeros(env.num_envs, device=env.device)
+
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    asset: Articulation = env.scene[asset_cfg.name]
+    first_contact = contact_sensor.compute_first_contact(env.step_dt)[:, sensor_cfg.body_ids]
+
+    feet_pos_w = asset.data.body_pos_w[:, asset_cfg.body_ids, :]
+    feet_quat_w = asset.data.body_quat_w[:, asset_cfg.body_ids, :]
+    num_envs, num_feet = feet_pos_w.shape[:2]
+    front_offset = torch.tensor(
+        (foot_front_extent, 0.0, 0.0), device=env.device
+    ).expand(num_envs, num_feet, -1)
+    rear_offset = torch.tensor(
+        (-foot_rear_extent, 0.0, 0.0), device=env.device
+    ).expand(num_envs, num_feet, -1)
+    foot_front_w = feet_pos_w + math_utils.quat_apply(
+        feet_quat_w.reshape(-1, 4), front_offset.reshape(-1, 3)
+    ).reshape(num_envs, num_feet, 3)
+    foot_rear_w = feet_pos_w + math_utils.quat_apply(
+        feet_quat_w.reshape(-1, 4), rear_offset.reshape(-1, 3)
+    ).reshape(num_envs, num_feet, 3)
+
+    yaw_quat = math_utils.yaw_quat(asset.data.root_quat_w)
+    yaw_quat = yaw_quat[:, None, :].expand(num_envs, num_feet, 4).reshape(-1, 4)
+    foot_front_yaw = math_utils.quat_apply_inverse(
+        yaw_quat, (foot_front_w - asset.data.root_pos_w[:, None, :]).reshape(-1, 3)
+    ).reshape(num_envs, num_feet, 3)
+    foot_rear_yaw = math_utils.quat_apply_inverse(
+        yaw_quat, (foot_rear_w - asset.data.root_pos_w[:, None, :]).reshape(-1, 3)
+    ).reshape(num_envs, num_feet, 3)
+    foot_near_x = torch.minimum(foot_front_yaw[..., 0], foot_rear_yaw[..., 0]).unsqueeze(-1)
+    foot_far_x = torch.maximum(foot_front_yaw[..., 0], foot_rear_yaw[..., 0]).unsqueeze(-1)
+
+    # Use the same ego-motion-compensated history as the actor. By the time a
+    # foot contacts a tread, the current camera frame often looks past that
+    # surface to the next step; current-frame-only matching therefore misses
+    # the landing that the policy just executed.
+    if hasattr(env, "motion_compensated_treads"):
+        treads = env.motion_compensated_treads()
+    else:
+        treads = env.terrain_geometry.treads
+    tread_world_z = env.motion_compensated_tread_heights()
+    sole_bottom_z = (feet_pos_w[..., 2] - sole_bottom_offset).unsqueeze(-1)
+    supported_by_tread, support_overlap, height_error, dense_score = match_sole_to_treads(
+        foot_near_x,
+        foot_far_x,
+        sole_bottom_z,
+        treads,
+        tread_world_z,
+        edge_margin,
+        min_support_overlap,
+        height_tolerance,
+    )
+    safe_near = treads[..., 0].unsqueeze(1) + edge_margin
+    safe_far = treads[..., 1].unsqueeze(1) - edge_margin
+    tread_valid = treads[..., 5].unsqueeze(1) > 0.5
+    centered_support, center_error, center_tolerance = centered_tread_support(
+        foot_near_x, foot_far_x, treads, supported_by_tread, center_fraction
+    )
+    dense_score = dense_score * torch.exp(-torch.square(center_error / center_tolerance))
+    near_tread = tread_valid & (support_overlap >= -0.06) & (height_error <= 0.20)
+    foot_force = contact_sensor.data.net_forces_w[:, sensor_cfg.body_ids, :]
+    upward_support = (foot_force[..., 2] > 5.0) & (
+        foot_force[..., 2] / torch.linalg.norm(foot_force, dim=-1).clamp_min(1.0)
+        >= min_support_vertical_ratio
+    )
+    safe_contact = centered_support.any(dim=-1) & first_contact & upward_support
+    stair_mode = getattr(env, "stair_mode", torch.zeros(num_envs, device=env.device))
+    unsafe_contact = unsafe_tread_touchdown(
+        first_contact,
+        safe_contact,
+        tread_valid,
+        support_overlap,
+        height_error,
+        stair_mode,
+        height_tolerance,
+    )
+    foot_speed = torch.linalg.norm(asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2], dim=-1)
+    stable_support = centered_support.any(dim=-1) & upward_support & (foot_speed < max_support_speed)
+    if not hasattr(env, "safe_tread_support_count"):
+        env.safe_tread_support_count = torch.zeros(
+            num_envs, num_feet, dtype=torch.long, device=env.device
+        )
+    support_count, confirmed = confirmed_support_transition(
+        env.safe_tread_support_count, stable_support, confirmation_frames
+    )
+    env.safe_tread_support_count = support_count
+
+    # Expose compact tensors for playback diagnostics. They are detached from
+    # the reward result and do not enter the policy observation.
+    env.safe_tread_first_contact = first_contact
+    env.safe_tread_supported_first_contact = safe_contact
+    env.safe_tread_unsafe_first_contact = unsafe_contact
+    env.safe_tread_confirmed_touchdown = confirmed
+    env.safe_tread_evaluated_step = env.sim_step_counter
+    if not hasattr(env, "_safe_tread_body_mass"):
+        env._safe_tread_body_mass = asset.data.default_mass.to(feet_pos_w.device)
+    mass = env._safe_tread_body_mass
+    total_mass = mass.sum(dim=1, keepdim=True).clamp_min(1.0e-6)
+    com_pos_w = (asset.data.body_com_pos_w * mass.unsqueeze(-1)).sum(dim=1) / total_mass
+    com_vel_w = (asset.data.body_com_lin_vel_w * mass.unsqueeze(-1)).sum(dim=1) / total_mass
+    capture_offset = capture_point_offset(
+        com_pos_w, com_vel_w, feet_pos_w, env._root_heading_xy()
+    )
+    env.safe_tread_capture_forward = capture_offset[..., 0]
+    env.safe_tread_capture_lateral = capture_offset[..., 1]
+    env.safe_tread_stable_support = stable_support
+    matched_overlap = torch.where(
+        centered_support, support_overlap, -torch.inf
+    )
+    matched_index = matched_overlap.argmax(dim=-1, keepdim=True)
+    env.safe_tread_confirmed_overlap = matched_overlap.gather(-1, matched_index).squeeze(-1)
+    env.safe_tread_confirmed_height_error = height_error.gather(-1, matched_index).squeeze(-1)
+    env.safe_tread_confirmed_safe_edges = torch.stack((safe_near, safe_far), dim=-1).expand(
+        -1, num_feet, -1, -1
+    ).gather(-2, matched_index.unsqueeze(-1).expand(-1, -1, -1, 2)).squeeze(-2)
+    env.safe_tread_confirmed_tread_height = tread_world_z.unsqueeze(1).expand(
+        -1, num_feet, -1
+    ).gather(-1, matched_index).squeeze(-1)
+    env.safe_tread_has_candidate = tread_valid.any(dim=(1, 2))
+    env.safe_tread_near_candidate = near_tread.any(dim=-1)
+    env.safe_tread_foot_inside = centered_support.any(dim=-1)
+    env.safe_tread_max_overlap = torch.where(
+        tread_valid, support_overlap, -torch.inf
+    ).amax(dim=(1, 2))
+    best_overlap_per_foot = torch.where(
+        tread_valid, support_overlap, -torch.inf
+    ).amax(dim=2)
+    env.safe_tread_contact_overlap = torch.where(
+        first_contact, best_overlap_per_foot, -torch.inf
+    ).amax(dim=1)
+    env.safe_tread_min_height_error = torch.where(
+        tread_valid & (support_overlap > 0.0), height_error, torch.inf
+    ).amin(dim=(1, 2))
+    interval_distance = torch.maximum(safe_near - foot_far_x, foot_near_x - safe_far).clamp_min(0.0)
+    interval_distance = torch.where(tread_valid, interval_distance, torch.inf)
+    env.safe_tread_min_distance = interval_distance.amin(dim=(1, 2))
+    env.safe_tread_feet_x = 0.5 * (foot_near_x.squeeze(-1) + foot_far_x.squeeze(-1))
+    env.safe_tread_near = torch.where(treads[..., 5] > 0.5, treads[..., 0] + edge_margin, torch.inf)
+    env.safe_tread_far = torch.where(treads[..., 5] > 0.5, treads[..., 1] - edge_margin, -torch.inf)
+
+    # Keep the first-contact diagnostics above, but provide a dense overlap
+    # signal for PPO. Requiring both a first-contact event and 4 cm of overlap
+    # made this term almost always zero, so the policy could see a valid target
+    # without receiving feedback while the foot was moving onto it.
+    contact_forces = contact_sensor.data.net_forces_w_history[:, :, sensor_cfg.body_ids, :]
+    contacts = torch.linalg.norm(contact_forces, dim=-1).amax(dim=1) > 1.0
+    swing_with_support = (~contacts) & contacts.any(dim=1, keepdim=True)
+    overlap_score = (dense_score * swing_with_support.unsqueeze(-1)).amax(dim=(1, 2))
+    confirmed_score = confirmed.float().mean(dim=1)
+    return overlap_score + touchdown_bonus * confirmed_score
+
+
 def feet_swing_height(
     env: Elf3Env, 
     sensor_cfg: SceneEntityCfg,
@@ -946,6 +1695,48 @@ def feet_swing_height(
     pos_error = torch.square(feet_pos_z - target_height) * (~contact).float()
     
     return torch.sum(pos_error, dim=-1)
+
+
+def recovery_orientation_l2(
+    env: BaseEnv | Elf3Env,
+    tilt_threshold: float = 0.10,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize body tilt only after it has entered a recovery band."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    tilt = torch.norm(asset.data.projected_gravity_b[:, :2], dim=1)
+    return torch.square(torch.clamp(tilt - tilt_threshold, min=0.0))
+
+
+def recovery_ang_vel_xy_l2(
+    env: BaseEnv | Elf3Env,
+    tilt_threshold: float = 0.10,
+    ang_vel_threshold: float = 0.45,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalize roll/pitch angular velocity when the body is already wobbling."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    tilt = torch.norm(asset.data.projected_gravity_b[:, :2], dim=1)
+    ang_vel_xy = torch.norm(asset.data.root_ang_vel_b[:, :2], dim=1)
+    recovering = (tilt > tilt_threshold) | (ang_vel_xy > ang_vel_threshold)
+    return recovering.float() * torch.square(torch.clamp(ang_vel_xy - ang_vel_threshold, min=0.0))
+
+
+def recovery_action_rate_l2(
+    env: BaseEnv | Elf3Env,
+    tilt_threshold: float = 0.10,
+    ang_vel_threshold: float = 0.45,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Discourage abrupt action changes while the robot is recovering balance."""
+    asset: Articulation = env.scene[asset_cfg.name]
+    tilt = torch.norm(asset.data.projected_gravity_b[:, :2], dim=1)
+    ang_vel_xy = torch.norm(asset.data.root_ang_vel_b[:, :2], dim=1)
+    recovering = (tilt > tilt_threshold) | (ang_vel_xy > ang_vel_threshold)
+
+    buf = env.action_buffer._circular_buffer.buffer
+    action_rate = torch.sum(torch.square(buf[:, -1, :] - buf[:, -2, :]), dim=1)
+    return recovering.float() * action_rate
 
 
 

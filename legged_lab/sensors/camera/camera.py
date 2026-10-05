@@ -40,6 +40,15 @@ class Camera(BasedCamera):
         self.cfg = cfg
         self.sensor_noise = self.cfg.sensor_noise
 
+    @property
+    def frame_timestamp(self):
+        """Acquisition time of the buffered frame in the sensor's simulation clock."""
+        return self._timestamp_last_update.clone()
+
+    @property
+    def current_timestamp(self):
+        return self._timestamp.clone()
+
     def _update_buffers_impl(self, env_ids: Sequence[int]):
         super()._update_buffers_impl(env_ids)
         # Apply noise to the depth images after updating the buffers

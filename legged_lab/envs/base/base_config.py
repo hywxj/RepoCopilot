@@ -43,6 +43,8 @@ class HeightScannerCfg:
     size: tuple = (1.6, 1.0)
     debug_vis: bool = False
     drift_range: tuple = (0.0, 0.0)
+    use_for_actor: bool = True
+    use_for_critic: bool = True
 
 
 @configclass
@@ -63,7 +65,7 @@ class BaseSceneCfg:
 class RobotCfg:
     actor_obs_history_length: int = 10
     critic_obs_history_length: int = 10
-    action_scale: float | list = 0.25  # 支持单一值或逐关节列表
+    action_scale: float | list | dict = 0.25
     terminate_contacts_body_names: list = []
     feet_body_names: list = []
 

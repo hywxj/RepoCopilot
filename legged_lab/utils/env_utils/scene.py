@@ -40,6 +40,19 @@ class SceneCfg(InteractiveSceneCfg):
     def __init__(self, config: "BaseSceneCfg", physics_dt, step_dt):
         super().__init__(num_envs=config.num_envs, env_spacing=config.env_spacing)
 
+        terrain_visual_material = sim_utils.MdlFileCfg(
+            mdl_path=f"{ISAACLAB_NUCLEUS_DIR}/Materials/TilesMarbleSpiderWhiteBrickBondHoned/TilesMarbleSpiderWhiteBrickBondHoned.mdl",
+            project_uvw=True,
+            texture_scale=(0.25, 0.25),
+        )
+        if (
+            config.terrain_type == "generator"
+            and config.terrain_generator is not None
+            and getattr(config.terrain_generator.class_type, "__name__", "")
+            in ("AtecTerrainGenerator", "AtecObstacleCourseTerrainGenerator")
+        ):
+            terrain_visual_material = None
+
         self.terrain = TerrainImporterCfg(
             prim_path="/World/ground",
             terrain_type=config.terrain_type,
@@ -52,11 +65,7 @@ class SceneCfg(InteractiveSceneCfg):
                 static_friction=1.0,
                 dynamic_friction=1.0,
             ),
-            visual_material=sim_utils.MdlFileCfg(
-                mdl_path=f"{ISAACLAB_NUCLEUS_DIR}/Materials/TilesMarbleSpiderWhiteBrickBondHoned/TilesMarbleSpiderWhiteBrickBondHoned.mdl",
-                project_uvw=True,
-                texture_scale=(0.25, 0.25),
-            ),
+            visual_material=terrain_visual_material,
             debug_vis=False,
         )
 
@@ -111,8 +120,19 @@ class SceneCfg(InteractiveSceneCfg):
                 offset=config.depth_camera.offset,
                 height=config.depth_camera.height,
                 width=config.depth_camera.width,
+                max_range=config.depth_camera.max_range,
+                min_range=config.depth_camera.min_range,
+                feature_width=config.depth_camera.feature_width,
+                feature_height=config.depth_camera.feature_height,
+                depth_history_length=config.depth_camera.depth_history_length,
+                frame_hold_prob=config.depth_camera.frame_hold_prob,
+                depth_quantization=config.depth_camera.depth_quantization,
+                geometry=config.depth_camera.geometry,
                 data_types=config.depth_camera.data_types,
                 spawn=config.depth_camera.spawn,
+                sensor_noise=config.depth_camera.sensor_noise,
+                update_period=config.depth_camera.update_period,
+                update_latest_camera_pose=config.depth_camera.update_latest_camera_pose,
                 debug_vis=config.depth_camera.debug_vis,
                 visualizer_cfg=config.depth_camera.visualizer_cfg,
             )

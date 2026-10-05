@@ -17,4 +17,5 @@
 # and is distributed under the BSD-3-Clause license.
 
 from .d455_depth_config import D455CameraCfg, TiledD455CameraCfg
+from .d435i_depth_config import D435iCameraCfg, TiledD435iCameraCfg
 from .luxonis_oak_d_config import LuxonisOakDConfig, TiledLuxonisOakDConfig

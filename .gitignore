@@ -1,0 +1,13 @@
+# Runtime outputs and local credentials must not be included in source handoffs.
+logs/
+**/__pycache__/
+*.py[cod]
+*.pt
+*.pth
+legged_lab/envs/elf3/datasets/motion_amp_expert/elf3_loco_clean_gmr/
+legged_lab/envs/elf3/datasets/motion_visualization/elf3_loco_clean_gmr/
+legged_lab/envs/elf3/datasets/motion_amp_expert/elf3_bmlrub_walk_gmr/
+legged_lab/envs/elf3/datasets/motion_visualization/elf3_bmlrub_walk_gmr/
+.env
+.env.*
+!.env.example

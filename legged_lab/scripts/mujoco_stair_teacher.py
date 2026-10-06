@@ -11,11 +11,114 @@ import mujoco.viewer
 import numpy as np
 
 from legged_lab.perception.mujoco_step_teacher import MujocoStepTeacher
-from legged_lab.perception.stair_step_controller import StairStepController, StepPhase
+from legged_lab.perception.stair_step_controller import StairStepController, StepControlCfg, StepPhase
 from legged_lab.perception.tread_surfaces import SurfaceValidationCfg, TreadSurfaceExtractor
 
 
 ROOT = Path(__file__).resolve().parents[2]
+TASK_GOAL = "both_full_soles_supported_on_same_observed_tread"
+
+
+def observed_mask_rectangles(mask):
+    """Partition observed cells into rectangles without filling holes or gaps."""
+    active, rectangles = {}, []
+    for row, cells in enumerate(np.asarray(mask, dtype=bool)):
+        edges = np.flatnonzero(np.diff(np.r_[False, cells, False]))
+        runs = {(int(start), int(end)) for start, end in edges.reshape(-1, 2)}
+        for run in sorted(active.keys() - runs):
+            rectangles.append((active.pop(run), row, *run))
+        for run in runs - active.keys():
+            active[run] = row
+    rectangles.extend((start, len(mask), *run) for run, start in sorted(active.items()))
+    return rectangles
+
+
+def observed_tread_quads(lock):
+    """World-space faces of the locked observed support mask, on its fitted plane."""
+    geometry = lock.geometry
+    surface = next(s for s in geometry.surfaces if s.surface_id == lock.surface_id)
+    half = geometry.cfg.grid_size/2
+    quads = []
+    for row_start, row_end, col_start, col_end in observed_mask_rectangles(surface.observed_mask):
+        low = geometry.grid_xy[row_start, col_start]-half
+        high = geometry.grid_xy[row_end-1, col_end-1]+half
+        xy = np.array([[low[0], low[1]], [high[0], low[1]],
+                       [high[0], high[1]], [low[0], high[1]]])
+        local = np.column_stack((xy, surface.height_at(xy)))
+        quads.append(local @ lock.rotation.T+lock.root_position)
+    return np.asarray(quads).reshape(-1, 4, 3)
+
+
+def _right_triangles(vertices):
+    """Split a triangle into right triangles for MuJoCo's triangle primitive."""
+    a, b, c = np.asarray(vertices)
+    normal = np.cross(b-a, c-a)
+    normal /= np.linalg.norm(normal)
+    # The longest edge keeps the altitude inside the triangle, even on a tilted plane.
+    edges = ((a, b, c), (b, c, a), (c, a, b))
+    start, end, apex = max(edges, key=lambda edge: np.linalg.norm(edge[1]-edge[0]))
+    base = end-start
+    foot = start+base*(np.dot(apex-start, base)/np.dot(base, base))
+    for endpoint in (start, end):
+        x, y = endpoint-foot, apex-foot
+        if min(np.linalg.norm(x), np.linalg.norm(y)) < 1.e-10:
+            continue
+        if np.dot(np.cross(x, y), normal) < 0:
+            x, y = y, x
+        size = np.array([np.linalg.norm(x), np.linalg.norm(y), 0.])
+        rotation = np.column_stack((x/size[0], y/size[1], normal))
+        yield foot, size, rotation
+
+
+def draw_target_region(scene, quads, lock=None, show_foot_targets=False):
+    """Draw only observed support; optional foot markers are control references."""
+    scene.ngeom = 0
+    if lock is None:
+        return
+    surface = next(s for s in lock.geometry.surfaces if s.surface_id == lock.surface_id)
+    normal = lock.rotation @ surface.normal
+    normal /= np.linalg.norm(normal)
+    for quad in quads:
+        raised = quad+.003*normal
+        for indices in ((0, 1, 2), (0, 2, 3)):
+            for position, size, rotation in _right_triangles(raised[list(indices)]):
+                if scene.ngeom >= scene.maxgeom:
+                    return  # Under-display complex masks; never replace them with a bounding box.
+                mujoco.mjv_initGeom(scene.geoms[scene.ngeom], mujoco.mjtGeom.mjGEOM_TRIANGLE,
+                                   size, position, rotation.ravel(), np.array([.12, .95, .30, .38]))
+                scene.ngeom += 1
+    if show_foot_targets:
+        cosine, sine = np.cos(lock.heading), np.sin(lock.heading)
+        rotation = np.array([[cosine, -sine, 0.], [sine, cosine, 0.], [0., 0., 1.]])
+        cfg = lock.geometry.cfg
+        for target in lock.targets:
+            if scene.ngeom >= scene.maxgeom:
+                return
+            mujoco.mjv_initGeom(scene.geoms[scene.ngeom], mujoco.mjtGeom.mjGEOM_LINEBOX,
+                               np.array([.5*(cfg.foot_front_extent+cfg.foot_rear_extent),
+                                         cfg.foot_half_width, .002]),
+                               target+.006*normal, rotation.ravel(), np.array([1., .7, .12, .9]))
+            scene.ngeom += 1
+
+
+def draw_motion_status(scene, sample):
+    """Update live status through the scene, without blocking overlay requests.
+
+    Repeated Handle.set_texts calls stall for about one second on this local
+    MuJoCo viewer build. Keep its screen overlay static and animate this label
+    alongside the rest of the user scene instead.
+    """
+    if scene.ngeom >= scene.maxgeom:
+        return
+    geom = scene.geoms[scene.ngeom]
+    # At the default 130-degree view this offset is screen-right of the torso,
+    # clear of the head silhouette and the fixed top-left screen overlay.
+    position = np.asarray(sample["root"])+[.50, .45, .10]
+    mujoco.mjv_initGeom(geom, mujoco.mjtGeom.mjGEOM_LABEL, np.zeros(3), position,
+                       np.eye(3).ravel(), np.array([1., 1., 1., 1.]))
+    left, right = sample["load_fraction"]
+    geom.label = f"{sample['phase']}  L/R: {left:.2f}/{right:.2f} BW"
+    scene.ngeom += 1
 
 
 def build_model(height=.11, width=.32, direction=1):
@@ -68,8 +171,14 @@ def build_model(height=.11, width=.32, direction=1):
 class TeachingEpisode:
     def __init__(self, height=.11, width=.32, direction=1):
         self.model, self.data = build_model(height, width, direction)
-        self.teacher = MujocoStepTeacher(self.model, self.data)
-        self.controller = StairStepController()
+        # The coordinated posture/trajectory is an ascent candidate. Descent
+        # retains its previous control until its own motion quality is improved.
+        self.teacher = MujocoStepTeacher(self.model, self.data, posture_control=direction > 0)
+        # Stay well inside the teacher's validated CoP limits (8 cm / 1.8 cm).
+        # The body need not reach the sole center before the rear foot can lift.
+        self.controller = StairStepController(StepControlCfg(support_com_half_length_m=.045 if direction > 0 else 0.,
+                                                             support_com_half_width_m=.010 if direction > 0 else 0.,
+                                                             overlap_swing_lift=direction > 0))
         self.direction = direction
         x, y = np.meshgrid(np.arange(-.32, .94, .003), np.arange(-.38, .38, .003))
         levels = np.where(x < .22, 0, np.where(x < .22+width, 1, 2))
@@ -84,6 +193,8 @@ class TeachingEpisode:
         self.initial_feet = self.measurement().sole_positions.copy()
         self.samples = []
         self.trace = []
+        self.target_region = None
+        self.target_region_quads = np.empty((0, 4, 3))
 
     def measurement(self):
         m = self.teacher.reader.measurement(self.data, include_contact_truth=True, camera_timestamp=self.geometry_time)
@@ -115,6 +226,21 @@ class TeachingEpisode:
                 surface.last_observed_time = self.geometry_time
         c.update(self.geometry, m, self.dt)
         c.constrain_body_reference(m)
+        if c.lock is not None and self.target_region is None:
+            self.target_region_quads = observed_tread_quads(c.lock)
+            vertices = self.target_region_quads.reshape(-1, 3)
+            self.target_region = {
+                "task_goal": TASK_GOAL,
+                "reference_role": "teacher_control_waypoints_not_required_foot_centers",
+                "region_source": "locked_observed_mask_from_known_simulation_treads",
+                "track_id": int(c.lock.track_id), "locked_at": float(m.timestamp),
+                "observed_quads_world": self.target_region_quads.tolist(),
+                "observed_bounds_world": [vertices.min(axis=0).tolist(), vertices.max(axis=0).tolist()],
+                "actual_soles_world_at_lock": m.sole_positions.tolist(),
+                "reference_soles_world": c.lock.targets.tolist(),
+                "reference_lateral_shift_body_m": ((c.lock.targets-m.sole_positions) @ m.yaw_rotation)[:, 1].tolist(),
+            }
+            print("[TARGET_REGION] "+json.dumps(self.target_region), flush=True)
         if c.phase == StepPhase.RECOVER:
             raise RuntimeError("Action teacher stopped: "+c.failure_reason)
         active = np.ones(2, dtype=bool)
@@ -158,7 +284,7 @@ class TeachingEpisode:
 
     def save_trace(self, path):
         if not self.samples or not self.samples[-1]["success"]:
-            raise ValueError("Only physically successful episodes may become expert demonstrations.")
+            raise ValueError("Only physically successful episodes may be saved as motion candidates.")
         np.savez_compressed(path,
                             state_time=np.array([row[0] for row in self.trace]),
                             qpos=np.stack([row[1] for row in self.trace]),
@@ -168,6 +294,12 @@ class TeachingEpisode:
                             actuator_joint_names=np.array([mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_JOINT,
                                                                           int(joint)) for joint in self.teacher.joints]),
                             physics_dt=self.model.opt.timestep, supervisor_dt=self.dt,
+                            task_goal=TASK_GOAL,
+                            target_region_quads_world=self.target_region_quads,
+                            reference_soles_world=self.controller.lock.targets,
+                            reference_role="teacher_control_waypoints_not_required_foot_centers",
+                            trace_role="physical_motion_candidate", motion_quality_validated=False,
+                            controller_profile="coordinated_ascent" if self.direction > 0 else "legacy_descent",
                             known_geometry=True, force_oracle=True, learned_policy=False)
 
 
@@ -177,18 +309,34 @@ def main():
     parser.add_argument("--duration", type=float, default=20.)
     parser.add_argument("--loop", action="store_true", help="Replay episodes in the visible viewer until closed.")
     parser.add_argument("--direction", choices=("up", "down"), default="up")
+    parser.add_argument("--controller", choices=("dynamic", "staged"), default="dynamic",
+                        help="Dynamic up/down motion candidate, or the earlier staged baseline.")
+    parser.add_argument("--initial_forward_offset", type=float, default=.05,
+                        help="Dynamic scene initial forward offset in metres; applied before physics, not an approach skill.")
+    parser.add_argument("--show_foot_targets", action="store_true",
+                        help="Show optional teacher foot reference markers inside the shared tread region.")
     parser.add_argument("--output_dir", default="logs/mujoco_stair_teacher")
     args = parser.parse_args()
     if args.duration <= 0 or (args.headless and args.loop):
         raise ValueError("Positive duration required; --loop requires a visible viewer.")
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
-    episode = TeachingEpisode(direction=1 if args.direction == "up" else -1)
+    direction = 1 if args.direction == "up" else -1
+    if args.controller == "dynamic":
+        from legged_lab.perception.mujoco_stair_motion import DynamicTeachingEpisode
+        episode = DynamicTeachingEpisode(direction=direction, initial_forward_offset=args.initial_forward_offset)
+    else:
+        episode = TeachingEpisode(direction=direction)
     viewer = None if args.headless else mujoco.viewer.launch_passive(episode.model, episode.data)
     if viewer is not None:
         viewer.cam.lookat[:] = [.3, 0., .65]
         viewer.cam.distance, viewer.cam.azimuth, viewer.cam.elevation = 2.5, 130., -18.
+        viewer.set_texts((None, mujoco.mjtGridPos.mjGRID_TOPLEFT,
+                          f"{args.direction.upper()} STAIRS | ACTION TEACHER (not learned policy)",
+                          "green: observed target tread"))
     print("[MODE] PHYSICAL ACTION TEACHER | known simulation treads | NOT learned-policy/depth-transfer playback", flush=True)
+    print("[PROFILE] "+json.dumps({"controller": args.controller,
+                                   "initial_forward_offset_m": getattr(episode, "initial_forward_offset", 0.)}), flush=True)
     index, failure, last_phase = 0, "", ""
     try:
         while viewer is None or viewer.is_running():
@@ -202,17 +350,10 @@ def main():
                 print("[TEACHER] "+json.dumps(sample), flush=True)
                 last_phase = sample["phase"]
             if viewer is not None:
-                viewer.set_texts((None, mujoco.mjtGridPos.mjGRID_TOPLEFT,
-                                  "ACTION TEACHER (not learned policy)\n"+sample["phase"],
-                                  f"known simulation treads\nload L/R: {sample['load_fraction'][0]:.2f} / {sample['load_fraction'][1]:.2f}"))
                 with viewer.lock():
-                    targets = episode.controller.lock
-                    viewer.user_scn.ngeom = 0 if targets is None else 2
-                    if targets is not None:
-                        for foot in range(2):
-                            mujoco.mjv_initGeom(viewer.user_scn.geoms[foot], mujoco.mjtGeom.mjGEOM_BOX,
-                                               np.array([.12, .042, .003]), targets.targets[foot]+[0., 0., .003],
-                                               np.eye(3).ravel(), np.array([.2, .9, .25, .3]))
+                    draw_target_region(viewer.user_scn, episode.target_region_quads,
+                                       episode.controller.lock, args.show_foot_targets)
+                    draw_motion_status(viewer.user_scn, sample)
                 viewer.sync()
                 time.sleep(max(0., episode.dt-(time.monotonic()-started)))
             done = sample["phase"] in ("COMPLETE", "RECOVER") or episode.data.time >= args.duration
@@ -220,29 +361,40 @@ def main():
                 report = {"mode": "physical_action_teacher", "geometry_source": "known_simulation_treads",
                           "learned_policy": False, "depth_transfer_verified": False, "force_oracle": True,
                           "root_fixed": False, "teleport_after_reset": False, "success": sample["success"],
+                          "motion_quality_validated": False,
+                          "controller_profile": getattr(episode, "profile", "coordinated_ascent" if episode.direction > 0 else "legacy_descent"),
+                          "initial_forward_offset_m": getattr(episode, "initial_forward_offset", 0.),
                           "failure": sample["failure"], "samples": episode.samples,
+                          "task_goal": TASK_GOAL, "target_region": episode.target_region,
+                          "show_foot_targets": args.show_foot_targets,
                           "max_planned_normalized_dynamics_residual": episode.teacher.max_dynamics_residual}
                 record_episode = not args.loop or index == 0
                 if report["success"] and record_episode:
-                    trace_path = output/f"{args.direction}_{index:03d}_expert.npz"
+                    trace_path = output/f"{args.direction}_{index:03d}_candidate.npz"
                     episode.save_trace(trace_path)
-                    report["expert_trace"] = str(trace_path)
+                    report["candidate_trace"] = str(trace_path)
                 if record_episode:
                     (output/f"{args.direction}_{index:03d}.json").write_text(json.dumps(report, indent=2)+"\n")
                 print("[RESULT] "+json.dumps({k: v for k, v in report.items() if k != "samples"}), flush=True)
                 if not args.loop:
                     break
                 time.sleep(1.)
+                if args.controller == "dynamic":
+                    episode = episode.reset()
+                    last_phase, index = "", index+1
+                    continue
                 mujoco.mj_resetData(episode.model, episode.data)
                 replacement = TeachingEpisode(direction=episode.direction)
                 episode.data.qpos[:] = replacement.data.qpos
                 mujoco.mj_forward(episode.model, episode.data)
                 replacement.model, replacement.data = episode.model, episode.data
-                replacement.teacher = MujocoStepTeacher(episode.model, episode.data)
+                replacement.teacher = MujocoStepTeacher(episode.model, episode.data,
+                                                       posture_control=episode.direction > 0)
                 episode, last_phase, index = replacement, "", index+1
         if failure:
             (output/f"{args.direction}_{index:03d}_failed.json").write_text(json.dumps(
                 {"mode": "physical_action_teacher", "success": False, "failure": failure,
+                 "task_goal": TASK_GOAL, "target_region": episode.target_region,
                  "samples": episode.samples}, indent=2)+"\n")
             if viewer is not None:
                 print("[FAILED] "+failure+"; viewer retained until closed.", flush=True)

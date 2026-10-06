@@ -205,6 +205,14 @@ class StairStepTest(unittest.TestCase):
             np.testing.assert_allclose(lock.targets[:, 2], direction*0.11, atol=0.001)
             self.assertGreaterEqual(lock.targets[0, 1]-lock.targets[1, 1], 0.16)
 
+    def test_plan_keeps_non_grid_aligned_lateral_stance_when_tread_allows_it(self):
+        for direction in (1, -1):
+            c, g, m = self.make_case(direction)
+            m.sole_positions[:, 1] = [.137, -.141]
+            lock = c.plan(g, m)
+            self.assertIsNotNone(lock)
+            np.testing.assert_allclose(lock.targets[:, 1], m.sole_positions[:, 1], atol=1.e-12)
+
     def test_nearest_unusable_level_cannot_be_skipped(self):
         c, g, m = self.make_case()
         nearest = min((s for s in g.surfaces if float(s.height_at(s.centroid[:2])) > -0.95),
@@ -480,6 +488,47 @@ class StairStepTest(unittest.TestCase):
         m.sole_positions[0, 0] += 0.02
         self.assertFalse(c._physical_support(m, 0))
 
+    def test_region_support_accepts_off_reference_landing_but_not_wrong_height_or_unknown_cells(self):
+        c, g, m = self.locked()
+        m.sole_positions = c.lock.targets.copy()
+        m.sole_positions[:, 1] += .04
+        self.assertTrue(c._physical_support(m, 0, record_plant=False))
+        m.sole_positions[0, 2] += .05
+        self.assertFalse(c._physical_support(m, 0, record_plant=False))
+        m.sole_positions[0, 2] -= .05
+        geometry = c.lock.geometry
+        position = (m.sole_positions[0]-c.lock.root_position) @ c.lock.rotation
+        distances = np.linalg.norm(geometry.grid_xy-position[:2], axis=-1)
+        cell = np.unravel_index(np.argmin(distances), distances.shape)
+        geometry.surfaces[c.lock.surface_id].observed_mask[cell] = False
+        self.assertFalse(c._physical_support(m, 0, record_plant=False))
+
+    def test_region_support_preserves_left_right_separation(self):
+        c, g, m = self.locked()
+        m.sole_positions = c.lock.targets.copy()
+        m.sole_positions[:, 1] = [.05, -.05]
+        self.assertFalse(c._physical_support(m, 0))
+        self.assertFalse(c._physical_support(m, 1))
+
+    def test_confirmed_plant_anchors_body_and_foot_at_actual_landing(self):
+        c, g, m = self.locked()
+        lead = c.lead
+        m.sole_positions[lead] = c.lock.targets[lead]+[0., .04, 0.]
+        self.assertTrue(c._physical_support(m, lead))
+        c.confirmed_plants[lead] = True
+        actual = m.sole_positions[lead].copy()
+        c._transition(StepPhase.SHIFT_TRAIL, m)
+        np.testing.assert_allclose(c.reference_feet[lead], actual)
+        m.hip_offsets = np.array([[0., .136, -.3825], [0., -.136, -.3825]])
+        m.com_offset = np.array([.02, .04, -.28])
+        c.features(m)
+        np.testing.assert_allclose(c.reference_root[:2]+m.com_offset[:2], actual[:2])
+        np.testing.assert_allclose(c.features(m)[12:18].reshape(2, 3)[lead], 0.)
+        # The support reference must not follow later slip.
+        m.sole_positions[lead, 1] += .02
+        np.testing.assert_allclose(c.execution_targets()[lead], actual)
+        self.assertFalse(c._physical_support(m, lead))
+
     def test_low_force_or_tilt_is_not_valid_support(self):
         c, g, m = self.locked()
         m.sole_positions = c.lock.targets.copy()
@@ -507,8 +556,51 @@ class StairStepTest(unittest.TestCase):
             previous = current
         self.assertFalse(c.success_event)
 
+    def test_region_descent_waits_for_horizontal_motion_to_slow(self):
+        c, g, m = self.locked()
+        swing = c.lead
+        m.contact_forces[swing, 2] = 0
+        m.contact_forces[1-swing, 2] = 1000
+        self.tick(c, g, m, 2)
+        self.assertEqual(c.phase, StepPhase.LIFT_LEAD)
+        m.sole_positions[swing] = c.lock.targets[swing]+[0., .04, .06]
+        m.sole_velocities[swing, 0] = .20
+        self.tick(c, g, m)
+        self.assertEqual(c.phase, StepPhase.LIFT_LEAD)
+        self.assertIsNone(c.descent_targets[swing])
+        m.sole_velocities[swing] = 0.
+        self.tick(c, g, m)
+        self.assertEqual(c.phase, StepPhase.LOWER_LEAD)
+        np.testing.assert_allclose(c.execution_targets()[swing, :2], m.sole_positions[swing, :2])
+
+    def test_committed_landing_is_not_refreshed_by_observing_only_nominal_reference(self):
+        c, g, m = self.locked()
+        swing = c.lead
+        m.contact_forces[swing, 2] = 0
+        m.contact_forces[1-swing, 2] = 1000
+        self.tick(c, g, m, 2)
+        m.sole_positions[swing] = c.lock.targets[swing]+[0., .04, .06]
+        self.tick(c, g, m)
+        self.assertEqual(c.phase, StepPhase.LOWER_LEAD)
+        target = (c.execution_targets()[swing]-m.root_position) @ m.yaw_rotation
+        # Hide a lateral strip under the committed sole, outside its old reference.
+        surface = g.surfaces[c.lock.surface_id]
+        surface.observed_mask[g.grid_xy[..., 1] > target[1]+.05] = False
+        nominal = (c.lock.targets[swing]-m.root_position) @ m.yaw_rotation
+        self.assertTrue(g.footprint_supported(surface.surface_id, nominal[:2]))
+        self.assertFalse(g.footprint_supported(surface.surface_id, target[:2]))
+        last_seen = c.lock.last_seen[swing]
+        self.tick(c, g, m)
+        self.assertEqual(c.lock.last_seen[swing], last_seen)
+        # A short occlusion is allowed, but it cannot remain fresh forever.
+        m.timestamp = last_seen+c.cfg.flight_occlusion_s+.01
+        c.update(g, m, .02)
+        self.assertEqual(c.phase, StepPhase.RECOVER)
+        self.assertEqual(c.failure_reason, 'swing_target_expired')
+
     def test_horizontal_crossing_waits_for_measured_sole_clearance(self):
         c, g, m = self.locked()
+        c.cfg.overlap_swing_lift = True
         m.contact_forces[c.lead, 2] = 0
         m.contact_forces[1-c.lead, 2] = 1000
         self.tick(c, g, m, 2)
@@ -516,11 +608,52 @@ class StairStepTest(unittest.TestCase):
         self.tick(c, g, m, 30)
         self.assertEqual(c.phase, StepPhase.LIFT_LEAD)
         self.assertFalse(c.lift_clearance_confirmed)
-        np.testing.assert_array_equal(c.reference_feet[c.lead, :2], start_xy)
-        m.sole_positions[c.lead, 2] = 0.17
+        # Move forward while lifting, but the whole sole must remain before the
+        # riser until measured clearance is available.
+        self.assertGreater(c.reference_feet[c.lead, 0], start_xy[0])
+        local = (c.reference_feet[c.lead]-c.lock.root_position) @ c.lock.rotation
+        surface = c.lock.geometry.surfaces[c.lock.surface_id]
+        self.assertLess(local[0]+.12, surface.near_edge.x_at(local[1]))
+        m.sole_positions[c.lead, 2] = c.lock.targets[c.lead, 2]+.021
         self.tick(c, g, m, 2)
         self.assertTrue(c.lift_clearance_confirmed)
         self.assertGreater(c.reference_feet[c.lead, 0], start_xy[0])
+
+    def test_interior_support_anchor_does_not_follow_swing_or_slipping_support(self):
+        c, g, m = self.locked()
+        c.cfg.support_com_half_length_m = .045
+        c.cfg.support_com_half_width_m = .010
+        lead = c.lead
+        m.sole_positions[lead] = c.lock.targets[lead]
+        self.assertTrue(c._physical_support(m, lead))
+        c.confirmed_plants[lead] = True
+        c._transition(StepPhase.SHIFT_TRAIL, m)
+        anchor = c._stance_com_anchor(lead)
+        offset = anchor-c.planted_positions[lead][:2]
+        self.assertAlmostEqual(offset[0], -.045)
+        self.assertAlmostEqual(abs(offset[1]), .010)
+        self.assertLess(abs(offset[0]), .080)
+        self.assertLess(abs(offset[1]), .018)
+        c.reference_feet[1-lead] += [.3, .02, .17]
+        m.sole_positions[lead, :2] += [.01, .01]
+        np.testing.assert_array_equal(c._stance_com_anchor(lead), anchor)
+
+    def test_high_sole_center_with_low_toe_cannot_start_crossing(self):
+        c, g, m = self.locked()
+        c.cfg.overlap_swing_lift = True
+        swing = c.lead
+        m.contact_forces[swing, 2] = 0.
+        m.contact_forces[1-swing, 2] = 1000.
+        self.tick(c, g, m, 2)
+        m.sole_positions[swing, 2] = c.lock.targets[swing, 2]+.025
+        angle = np.deg2rad(15.)
+        m.foot_rotations[swing] = [[np.cos(angle), 0., np.sin(angle)],
+                                   [0., 1., 0.], [-np.sin(angle), 0., np.cos(angle)]]
+        self.tick(c, g, m, 20)
+        self.assertFalse(c.lift_clearance_confirmed)
+        local = (c.reference_feet[swing]-c.lock.root_position) @ c.lock.rotation
+        surface = c.lock.geometry.surfaces[c.lock.surface_id]
+        self.assertLess(local[0]+.12, surface.near_edge.x_at(local[1]))
 
     def test_lift_progress_rewards_only_new_measured_whole_sole_height(self):
         c, g, m = self.locked()
@@ -565,9 +698,10 @@ class StairStepTest(unittest.TestCase):
 
     def test_synthetic_up_and_down_sequence_requires_both_feet_and_emits_once(self):
         # Measured states are constructed here: this is not a physics success test.
-        for direction in (1, -1):
+        for direction, lateral_offset in ((1, 0.), (-1, 0.), (1, .04), (-1, .04)):
             c, g, m = self.locked(direction)
-            target = c.lock.targets.copy()
+            nominal = c.lock.targets.copy()
+            target = nominal+[0., lateral_offset, 0.]
             lead, trail = c.lead, 1-c.lead
             m.contact_forces[:, 2] = [0, 1000] if lead == 0 else [1000, 0]
             self.tick(c, g, m, 2)
@@ -595,7 +729,9 @@ class StairStepTest(unittest.TestCase):
             self.tick(c, g, m, 4)
             self.assertEqual(c.phase, StepPhase.COMPLETE)
             self.assertTrue(c.success_event)
-            np.testing.assert_array_equal(c.lock.targets, target)
+            np.testing.assert_array_equal(c.lock.targets, nominal)
+            np.testing.assert_allclose(c.execution_targets(), target)
+            np.testing.assert_allclose(c.reference_feet, target)
             self.tick(c, g, m)
             self.assertFalse(c.success_event)
 

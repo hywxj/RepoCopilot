@@ -62,19 +62,71 @@ class MujocoStepTeacherTest(unittest.TestCase):
                 episode.save_trace(path)
             self.assertFalse(path.exists())
 
+    def test_com_feedforward_tracks_smooth_transfer_with_physical_support(self):
+        from legged_lab.scripts.mujoco_stair_teacher import build_model
+        from legged_lab.perception.mujoco_step_teacher import MujocoStepTeacher
+        model, data = build_model()
+        teacher = MujocoStepTeacher(model, data)
+        m = teacher.reader.measurement(data)
+        root, feet = m.root_position.copy(), m.sole_positions.copy()
+        initial_com = data.subtree_com[teacher.reader.root_id].copy()
+        displacement = np.array([.025, .010, 0.])
+        tracking_errors = []
+        for k in range(480):
+            t = k*model.opt.timestep
+            s = min(t, 1.)
+            blend = 10*s**3-15*s**4+6*s**5
+            speed = (30*s**2-60*s**3+30*s**4) if t < 1. else 0.
+            acceleration = (60*s-180*s**2+120*s**3) if t < 1. else 0.
+            com = initial_com+blend*displacement
+            data.ctrl[:] = teacher.control(root+blend*displacement, feet, [True, True],
+                                           model.opt.timestep, [.5, .5], com_reference=com,
+                                           com_velocity=speed*displacement,
+                                           com_acceleration=acceleration*displacement,
+                                           com_acceleration_limit=3.)
+            tracking_errors.append(np.linalg.norm(data.subtree_com[teacher.reader.root_id]-com))
+            mujoco.mj_step(model, data)
+        mujoco.mj_forward(model, data)
+        self.assertLess(max(tracking_errors), .005)
+        np.testing.assert_allclose(data.subtree_com[teacher.reader.root_id], initial_com+displacement, atol=.003)
+        measured = teacher.reader.measurement(data, include_contact_truth=True)
+        self.assertTrue((measured.contact_forces[:, 2]/measured.body_weight > .2).all())
+        np.testing.assert_allclose(measured.sole_positions, feet, atol=.003)
+        np.testing.assert_array_equal(data.qfrc_applied, 0.)
+        np.testing.assert_array_equal(data.xfrc_applied, 0.)
+
     def test_physical_up_and_down_complete_with_aligned_expert_data(self):
+        from scipy.spatial.transform import Rotation
         from legged_lab.scripts.mujoco_stair_teacher import TeachingEpisode
         from legged_lab.perception.stair_step_controller import StepPhase
         for direction in (1, -1):
             with self.subTest(direction=direction):
                 episode = TeachingEpisode(direction=direction)
+                pelvis_angles, shoulder_offsets, joint_margins = [], [], []
+                teacher = episode.teacher
+                shoulder = [i for i, joint in enumerate(teacher.joints)
+                            if "shoulder" in mujoco.mj_id2name(episode.model, mujoco.mjtObj.mjOBJ_JOINT, int(joint))]
                 while episode.data.time < 15.:
                     sample = episode.tick()
+                    pelvis_angles.append(Rotation.from_matrix(
+                        episode.data.xmat[teacher.pelvis_id].reshape(3, 3)).as_euler('xyz'))
+                    q = episode.data.qpos[teacher.qpos]
+                    shoulder_offsets.append(np.abs(q[shoulder]-teacher.nominal[shoulder]))
+                    ranges = episode.model.jnt_range[teacher.joints]
+                    joint_margins.append(np.minimum(q-ranges[:, 0], ranges[:, 1]-q))
                     if sample["success"]:
                         break
                 self.assertEqual(episode.controller.phase, StepPhase.COMPLETE)
                 self.assertTrue(episode.controller.support_valid.all())
                 self.assertTrue((np.array(sample["load_fraction"]) >= .2).all())
+                # End-position success alone previously accepted waist-limit
+                # hip hiking and large arm compensation throughout the step.
+                if direction > 0:  # New posture control is scoped to the ascent candidate.
+                    self.assertLess(np.max(np.abs(np.asarray(pelvis_angles)[:, 0])), np.deg2rad(3.))
+                    self.assertLess(np.max(np.abs(np.asarray(pelvis_angles)[:, 1])), np.deg2rad(5.))
+                    self.assertLess(np.max(np.abs(np.asarray(pelvis_angles)[:, 2])), np.deg2rad(6.))
+                    self.assertLess(np.max(shoulder_offsets), np.deg2rad(20.))
+                    self.assertGreater(np.min(joint_margins), -1.e-3)
                 self.assertGreater(sample["root"][0], .30)
                 np.testing.assert_allclose(np.array(sample["feet"])[:, 2], .11, atol=.002)
                 np.testing.assert_array_equal(episode.data.qfrc_applied, 0.)
@@ -89,6 +141,7 @@ class MujocoStepTeacherTest(unittest.TestCase):
                         np.testing.assert_allclose(trace["step_features"][:, 34:36], 0.)
                         self.assertTrue(bool(trace["force_oracle"]))
                         self.assertFalse(bool(trace["learned_policy"]))
+                        self.assertFalse(bool(trace["motion_quality_validated"]))
                         self.assertTrue(np.isfinite(trace["motor_torques"]).all())
 
 

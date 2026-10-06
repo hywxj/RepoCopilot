@@ -1,0 +1,833 @@
+{
+  "source": "logs/posture_experiments/coordinated_swing_up/up_000_expert.npz",
+  "direction": "up",
+  "method": "forward_kinematics_of_recorded_states_without_physics_steps",
+  "scope": "Observed motion metrics only; not certification of natural or robust gait.",
+  "rpy_convention": "world-frame xyz Euler angles, degrees",
+  "limit_margin_convention": "Positive inside XML limits; negative means recorded limit exceedance.",
+  "sample_count": 838,
+  "start_time_s": 0.0,
+  "end_time_s": 8.370000000000477,
+  "duration_s": 8.370000000000477,
+  "torso_max_abs_rpy_deg": [
+    3.8697900573330317,
+    7.335523310273538,
+    5.502144486250217
+  ],
+  "pelvis_max_abs_rpy_deg": [
+    0.8352414009923825,
+    1.08007571257441,
+    1.4802198226281653
+  ],
+  "root_initial_height_m": 1.0337653530403879,
+  "root_min_height_m": 0.9520060053903675,
+  "root_max_drop_from_initial_m": 0.08175934765002035,
+  "root_min_height_at": {
+    "time_s": 5.110000000000099,
+    "phase": "LIFT_TRAIL"
+  },
+  "joint_angles": {
+    "waist_y_joint": {
+      "min_deg": -6.882369323245074,
+      "max_deg": 0.4998590750845633,
+      "max_abs_change_from_initial_deg": 6.882369323245074,
+      "limit_deg": [
+        -30.0000701530499,
+        30.0000701530499
+      ],
+      "minimum_limit_margin_deg": 23.117700829804825,
+      "minimum_limit_margin_at": {
+        "time_s": 3.1299999999999444,
+        "phase": "LOWER_LEAD"
+      }
+    },
+    "waist_x_joint": {
+      "min_deg": -3.986310240420984,
+      "max_deg": 3.742604196172615,
+      "max_abs_change_from_initial_deg": 3.986310240420984,
+      "limit_deg": [
+        -15.00003507652495,
+        15.00003507652495
+      ],
+      "minimum_limit_margin_deg": 11.013724836103966,
+      "minimum_limit_margin_at": {
+        "time_s": 7.1800000000004225,
+        "phase": "LOWER_TRAIL"
+      }
+    },
+    "waist_z_joint": {
+      "min_deg": -1.1364720769951826,
+      "max_deg": 5.507098090502709,
+      "max_abs_change_from_initial_deg": 5.507098090502709,
+      "limit_deg": [
+        -165.00038584177446,
+        165.00038584177446
+      ],
+      "minimum_limit_margin_deg": 159.49328775127174,
+      "minimum_limit_margin_at": {
+        "time_s": 4.720000000000038,
+        "phase": "SHIFT_TRAIL"
+      }
+    },
+    "l_hip_y_joint": {
+      "min_deg": -30.489973727685094,
+      "max_deg": 16.437380638790824,
+      "max_abs_change_from_initial_deg": 33.626114492715516,
+      "limit_deg": [
+        -165.00038584177446,
+        165.00038584177446
+      ],
+      "minimum_limit_margin_deg": 134.51041211408938,
+      "minimum_limit_margin_at": {
+        "time_s": 6.400000000000301,
+        "phase": "LOWER_TRAIL"
+      }
+    },
+    "l_hip_x_joint": {
+      "min_deg": -12.5898075183437,
+      "max_deg": 15.099660308315261,
+      "max_abs_change_from_initial_deg": 15.099660308315261,
+      "limit_deg": [
+        -27.9998744902482,
+        174.99849936680735
+      ],
+      "minimum_limit_margin_deg": 15.410066971904499,
+      "minimum_limit_margin_at": {
+        "time_s": 3.0899999999999452,
+        "phase": "LOWER_LEAD"
+      }
+    },
+    "l_hip_z_joint": {
+      "min_deg": -5.86480447191436,
+      "max_deg": 3.3053857426376876,
+      "max_abs_change_from_initial_deg": 5.86480447191436,
+      "limit_deg": [
+        -165.00038584177446,
+        165.00038584177446
+      ],
+      "minimum_limit_margin_deg": 159.1355813698601,
+      "minimum_limit_margin_at": {
+        "time_s": 6.610000000000333,
+        "phase": "LOWER_TRAIL"
+      }
+    },
+    "l_knee_y_joint": {
+      "min_deg": 20.493479188073145,
+      "max_deg": 53.88435519567225,
+      "max_abs_change_from_initial_deg": 19.50688748782286,
+      "limit_deg": [
+        -4.999973494988642,
+        150.00035076524952
+      ],
+      "minimum_limit_margin_deg": 25.493452683061786,
+      "minimum_limit_margin_at": {
+        "time_s": 1.6599999999999757,
+        "phase": "LIFT_LEAD"
+      }
+    },
+    "l_ankle_y_joint": {
+      "min_deg": -43.93717392219474,
+      "max_deg": -9.784795634740686,
+      "max_abs_change_from_initial_deg": 26.748440068270043,
+      "limit_deg": [
+        -49.99973494988642,
+        45.00010522957486
+      ],
+      "minimum_limit_margin_deg": 6.062561027691679,
+      "minimum_limit_margin_at": {
+        "time_s": 5.550000000000168,
+        "phase": "LIFT_TRAIL"
+      }
+    },
+    "l_ankle_x_joint": {
+      "min_deg": -13.361030212124236,
+      "max_deg": 12.969551335693131,
+      "max_abs_change_from_initial_deg": 13.361030212124236,
+      "limit_deg": [
+        -20.000237754631645,
+        20.000237754631645
+      ],
+      "minimum_limit_margin_deg": 6.639207542507409,
+      "minimum_limit_margin_at": {
+        "time_s": 6.620000000000335,
+        "phase": "LOWER_TRAIL"
+      }
+    },
+    "r_hip_y_joint": {
+      "min_deg": -63.338354238672245,
+      "max_deg": -13.719803571054658,
+      "max_abs_change_from_initial_deg": 46.14962038474755,
+      "limit_deg": [
+        -165.00038584177446,
+        165.00038584177446
+      ],
+      "minimum_limit_margin_deg": 101.6620316031022,
+      "minimum_limit_margin_at": {
+        "time_s": 2.249999999999963,
+        "phase": "LIFT_LEAD"
+      }
+    },
+    "r_hip_x_joint": {
+      "min_deg": -11.51995444570747,
+      "max_deg": 13.41996603878148,
+      "max_abs_change_from_initial_deg": 13.41996603878148,
+      "limit_deg": [
+        -174.99849936680735,
+        27.9998744902482
+      ],
+      "minimum_limit_margin_deg": 14.57990845146672,
+      "minimum_limit_margin_at": {
+        "time_s": 6.990000000000393,
+        "phase": "LOWER_TRAIL"
+      }
+    },
+    "r_hip_z_joint": {
+      "min_deg": -13.858038196190847,
+      "max_deg": 13.508624861272207,
+      "max_abs_change_from_initial_deg": 13.858038196190847,
+      "limit_deg": [
+        -165.00038584177446,
+        165.00038584177446
+      ],
+      "minimum_limit_margin_deg": 151.1423476455836,
+      "minimum_limit_margin_at": {
+        "time_s": 5.140000000000104,
+        "phase": "LIFT_TRAIL"
+      }
+    },
+    "r_knee_y_joint": {
+      "min_deg": 23.15330123737908,
+      "max_deg": 92.40860958328231,
+      "max_abs_change_from_initial_deg": 58.03114187543292,
+      "limit_deg": [
+        -4.999973494988642,
+        150.00035076524952
+      ],
+      "minimum_limit_margin_deg": 28.15327473236772,
+      "minimum_limit_margin_at": {
+        "time_s": 6.46000000000031,
+        "phase": "LOWER_TRAIL"
+      }
+    },
+    "r_ankle_y_joint": {
+      "min_deg": -41.554138286765145,
+      "max_deg": 22.37138536730531,
+      "max_abs_change_from_initial_deg": 39.56011922123001,
+      "limit_deg": [
+        -49.99973494988642,
+        45.00010522957486
+      ],
+      "minimum_limit_margin_deg": 8.445596663121272,
+      "minimum_limit_margin_at": {
+        "time_s": 5.170000000000108,
+        "phase": "LIFT_TRAIL"
+      }
+    },
+    "r_ankle_x_joint": {
+      "min_deg": -19.563035500871354,
+      "max_deg": 14.877918188767369,
+      "max_abs_change_from_initial_deg": 19.563035500871354,
+      "limit_deg": [
+        -20.000237754631645,
+        20.000237754631645
+      ],
+      "minimum_limit_margin_deg": 0.4372022537602902,
+      "minimum_limit_margin_at": {
+        "time_s": 5.250000000000121,
+        "phase": "LIFT_TRAIL"
+      }
+    },
+    "l_shoulder_y_joint": {
+      "min_deg": 11.458330433993781,
+      "max_deg": 25.454913234767602,
+      "max_abs_change_from_initial_deg": 13.995757332151136,
+      "limit_deg": [
+        -165.00038584177446,
+        165.00038584177446
+      ],
+      "minimum_limit_margin_deg": 139.54547260700684,
+      "minimum_limit_margin_at": {
+        "time_s": 4.8000000000000504,
+        "phase": "SHIFT_TRAIL"
+      }
+    },
+    "l_shoulder_x_joint": {
+      "min_deg": 5.911003209411163,
+      "max_deg": 8.594366926962348,
+      "max_abs_change_from_initial_deg": 2.6833637175511846,
+      "limit_deg": [
+        -20.000237754631645,
+        174.99849936680735
+      ],
+      "minimum_limit_margin_deg": 25.911240964042808,
+      "minimum_limit_margin_at": {
+        "time_s": 5.030000000000086,
+        "phase": "LIFT_TRAIL"
+      }
+    },
+    "l_shoulder_z_joint": {
+      "min_deg": -0.03511874399700019,
+      "max_deg": 0.9449195001347332,
+      "max_abs_change_from_initial_deg": 0.9449195001347332,
+      "limit_deg": [
+        -165.00038584177446,
+        165.00038584177446
+      ],
+      "minimum_limit_margin_deg": 164.05546634163971,
+      "minimum_limit_margin_at": {
+        "time_s": 8.370000000000477,
+        "phase": "COMPLETE"
+      }
+    },
+    "l_elbow_y_joint": {
+      "min_deg": 34.25989123154016,
+      "max_deg": 34.46964768792277,
+      "max_abs_change_from_initial_deg": 0.11757647630923174,
+      "limit_deg": [
+        -54.99993762799311,
+        95.00213201064179
+      ],
+      "minimum_limit_margin_deg": 60.532484322719014,
+      "minimum_limit_margin_at": {
+        "time_s": 3.0899999999999452,
+        "phase": "LOWER_LEAD"
+      }
+    },
+    "l_wrist_x_joint": {
+      "min_deg": -0.08514475949275131,
+      "max_deg": 7.334650766377996e-06,
+      "max_abs_change_from_initial_deg": 0.08514475949275131,
+      "limit_deg": [
+        -165.00038584177446,
+        165.00038584177446
+      ],
+      "minimum_limit_margin_deg": 164.9152410822817,
+      "minimum_limit_margin_at": {
+        "time_s": 8.370000000000477,
+        "phase": "COMPLETE"
+      }
+    },
+    "l_wrist_y_joint": {
+      "min_deg": -0.03215364268367248,
+      "max_deg": 0.007030123283973189,
+      "max_abs_change_from_initial_deg": 0.03215364268367248,
+      "limit_deg": [
+        -75.00017538262476,
+        75.00017538262476
+      ],
+      "minimum_limit_margin_deg": 74.9680217399411,
+      "minimum_limit_margin_at": {
+        "time_s": 8.370000000000477,
+        "phase": "COMPLETE"
+      }
+    },
+    "l_wrist_z_joint": {
+      "min_deg": -0.002531197016661392,
+      "max_deg": 0.057945177653077794,
+      "max_abs_change_from_initial_deg": 0.057945177653077794,
+      "limit_deg": [
+        -45.00010522957486,
+        45.00010522957486
+      ],
+      "minimum_limit_margin_deg": 44.94216005192178,
+      "minimum_limit_margin_at": {
+        "time_s": 8.370000000000477,
+        "phase": "COMPLETE"
+      }
+    },
+    "r_shoulder_y_joint": {
+      "min_deg": -2.6392551409571925,
+      "max_deg": 11.486075243206775,
+      "max_abs_change_from_initial_deg": 14.098411043573659,
+      "limit_deg": [
+        -165.00038584177446,
+        165.00038584177446
+      ],
+      "minimum_limit_margin_deg": 153.51431059856768,
+      "minimum_limit_margin_at": {
+        "time_s": 3.1199999999999446,
+        "phase": "LOWER_LEAD"
+      }
+    },
+    "r_shoulder_x_joint": {
+      "min_deg": -8.635675950493741,
+      "max_deg": -4.862892121778057,
+      "max_abs_change_from_initial_deg": 3.7314748051842903,
+      "limit_deg": [
+        -174.99849936680735,
+        20.000237754631645
+      ],
+      "minimum_limit_margin_deg": 24.8631298764097,
+      "minimum_limit_margin_at": {
+        "time_s": 5.350000000000136,
+        "phase": "LIFT_TRAIL"
+      }
+    },
+    "r_shoulder_z_joint": {
+      "min_deg": -0.03145894463079337,
+      "max_deg": 5.92505687414697,
+      "max_abs_change_from_initial_deg": 5.92505687414697,
+      "limit_deg": [
+        -165.00038584177446,
+        165.00038584177446
+      ],
+      "minimum_limit_margin_deg": 159.07532896762748,
+      "minimum_limit_margin_at": {
+        "time_s": 5.350000000000136,
+        "phase": "LIFT_TRAIL"
+      }
+    },
+    "r_elbow_y_joint": {
+      "min_deg": 34.35147262302141,
+      "max_deg": 35.070720553517084,
+      "max_abs_change_from_initial_deg": 0.6932528456676934,
+      "limit_deg": [
+        -54.99993762799311,
+        95.00213201064179
+      ],
+      "minimum_limit_margin_deg": 59.9314114571247,
+      "minimum_limit_margin_at": {
+        "time_s": 8.370000000000477,
+        "phase": "COMPLETE"
+      }
+    },
+    "r_wrist_x_joint": {
+      "min_deg": -0.06043835022122407,
+      "max_deg": 0.0,
+      "max_abs_change_from_initial_deg": 0.06043835022122407,
+      "limit_deg": [
+        -165.00038584177446,
+        165.00038584177446
+      ],
+      "minimum_limit_margin_deg": 164.93994749155323,
+      "minimum_limit_margin_at": {
+        "time_s": 8.370000000000477,
+        "phase": "COMPLETE"
+      }
+    },
+    "r_wrist_y_joint": {
+      "min_deg": -0.0020164611177027583,
+      "max_deg": 0.05319044540642262,
+      "max_abs_change_from_initial_deg": 0.05319044540642262,
+      "limit_deg": [
+        -75.00017538262476,
+        75.00017538262476
+      ],
+      "minimum_limit_margin_deg": 74.94698493721833,
+      "minimum_limit_margin_at": {
+        "time_s": 8.370000000000477,
+        "phase": "COMPLETE"
+      }
+    },
+    "r_wrist_z_joint": {
+      "min_deg": -0.0023203012318387737,
+      "max_deg": 0.04107332643454562,
+      "max_abs_change_from_initial_deg": 0.04107332643454562,
+      "limit_deg": [
+        -45.00010522957486,
+        45.00010522957486
+      ],
+      "minimum_limit_margin_deg": 44.959031903140314,
+      "minimum_limit_margin_at": {
+        "time_s": 8.370000000000477,
+        "phase": "COMPLETE"
+      }
+    }
+  },
+  "phases": {
+    "BLIND": {
+      "time_s": [
+        0.0,
+        0.15000000000000008
+      ],
+      "sample_count": 16,
+      "contiguous_sample_intervals_s": [
+        [
+          0.0,
+          0.15000000000000008
+        ]
+      ],
+      "torso_max_abs_rpy_deg": [
+        1.7852565620642345e-05,
+        0.00014411769107953233,
+        2.7658779563759934e-06
+      ],
+      "pelvis_max_abs_rpy_deg": [
+        3.9261194041846185e-05,
+        0.0019410263585702564,
+        1.4692465066014588e-05
+      ],
+      "com_min_xy_m": [
+        0.015447826095320994,
+        6.872436385409941e-05
+      ],
+      "com_max_xy_m": [
+        0.015455103890235843,
+        6.89126020524307e-05
+      ]
+    },
+    "OBSERVE": {
+      "time_s": [
+        0.1600000000000001,
+        0.2700000000000002
+      ],
+      "sample_count": 12,
+      "contiguous_sample_intervals_s": [
+        [
+          0.1600000000000001,
+          0.2700000000000002
+        ]
+      ],
+      "torso_max_abs_rpy_deg": [
+        1.1602248953233879e-05,
+        0.00012344315121577627,
+        3.3398396390749252e-06
+      ],
+      "pelvis_max_abs_rpy_deg": [
+        3.9113025249859796e-05,
+        0.0018972506772820211,
+        1.751082935936202e-05
+      ],
+      "com_min_xy_m": [
+        0.015455161159995618,
+        6.889406465422933e-05
+      ],
+      "com_max_xy_m": [
+        0.015455246832924084,
+        6.890807723127292e-05
+      ]
+    },
+    "SHIFT_LEAD": {
+      "time_s": [
+        0.2800000000000002,
+        1.1199999999999872
+      ],
+      "sample_count": 85,
+      "contiguous_sample_intervals_s": [
+        [
+          0.2800000000000002,
+          1.1199999999999872
+        ]
+      ],
+      "torso_max_abs_rpy_deg": [
+        3.294014593419701,
+        0.0057317142274732795,
+        0.08467632587653535
+      ],
+      "pelvis_max_abs_rpy_deg": [
+        0.586455283619561,
+        0.4919517587457964,
+        0.3071477840635912
+      ],
+      "com_min_xy_m": [
+        0.015455247869676227,
+        6.889280713201552e-05
+      ],
+      "com_max_xy_m": [
+        0.028977013696302352,
+        0.10922456631151181
+      ]
+    },
+    "LIFT_LEAD": {
+      "time_s": [
+        1.129999999999987,
+        2.4299999999999593
+      ],
+      "sample_count": 131,
+      "contiguous_sample_intervals_s": [
+        [
+          1.129999999999987,
+          2.4299999999999593
+        ]
+      ],
+      "torso_max_abs_rpy_deg": [
+        3.8589422171103407,
+        6.1120729568756405,
+        0.37592363591291933
+      ],
+      "pelvis_max_abs_rpy_deg": [
+        0.8352414009923825,
+        0.5263490982711589,
+        0.5080731850711271
+      ],
+      "com_min_xy_m": [
+        0.02901365391923223,
+        0.1098584024634008
+      ],
+      "com_max_xy_m": [
+        0.03321592832034531,
+        0.12488747443021668
+      ]
+    },
+    "LOWER_LEAD": {
+      "time_s": [
+        2.439999999999959,
+        3.5099999999999363
+      ],
+      "sample_count": 108,
+      "contiguous_sample_intervals_s": [
+        [
+          2.439999999999959,
+          3.5099999999999363
+        ]
+      ],
+      "torso_max_abs_rpy_deg": [
+        3.8697900573330317,
+        7.335523310273538,
+        0.4452020474604627
+      ],
+      "pelvis_max_abs_rpy_deg": [
+        0.3167576018435835,
+        0.6763029508854124,
+        0.9236505069743479
+      ],
+      "com_min_xy_m": [
+        0.03182266652145765,
+        0.10261764118036257
+      ],
+      "com_max_xy_m": [
+        0.063108961928941,
+        0.12435997442511373
+      ]
+    },
+    "TRANSFER": {
+      "time_s": [
+        3.519999999999936,
+        4.229999999999961
+      ],
+      "sample_count": 72,
+      "contiguous_sample_intervals_s": [
+        [
+          3.519999999999936,
+          4.229999999999961
+        ]
+      ],
+      "torso_max_abs_rpy_deg": [
+        2.909784579534349,
+        7.25729481355517,
+        4.042910614945613
+      ],
+      "pelvis_max_abs_rpy_deg": [
+        0.3445796713012253,
+        0.44031841511978453,
+        1.4802198226281653
+      ],
+      "com_min_xy_m": [
+        0.06376825363459002,
+        0.00020390011445373097
+      ],
+      "com_max_xy_m": [
+        0.20808798165979867,
+        0.10205161854935318
+      ]
+    },
+    "SHIFT_TRAIL": {
+      "time_s": [
+        4.239999999999963,
+        4.970000000000077
+      ],
+      "sample_count": 74,
+      "contiguous_sample_intervals_s": [
+        [
+          4.239999999999963,
+          4.970000000000077
+        ]
+      ],
+      "torso_max_abs_rpy_deg": [
+        3.4845056171573137,
+        7.131542147685881,
+        5.502144486250217
+      ],
+      "pelvis_max_abs_rpy_deg": [
+        0.538451821666417,
+        0.6815721113392763,
+        1.120600314393835
+      ],
+      "com_min_xy_m": [
+        0.2098055426595524,
+        -0.11606024421913026
+      ],
+      "com_max_xy_m": [
+        0.3183348962573887,
+        -0.0013683573611356532
+      ]
+    },
+    "LIFT_TRAIL": {
+      "time_s": [
+        4.980000000000079,
+        6.290000000000283
+      ],
+      "sample_count": 132,
+      "contiguous_sample_intervals_s": [
+        [
+          4.980000000000079,
+          6.290000000000283
+        ]
+      ],
+      "torso_max_abs_rpy_deg": [
+        3.8459684528310585,
+        7.085479549546012,
+        4.636672573707617
+      ],
+      "pelvis_max_abs_rpy_deg": [
+        0.5732591781011613,
+        1.0071823254344217,
+        0.4594303427925309
+      ],
+      "com_min_xy_m": [
+        0.3187095583165398,
+        -0.13125736158836906
+      ],
+      "com_max_xy_m": [
+        0.3361751661156003,
+        -0.1164977940258575
+      ]
+    },
+    "LOWER_TRAIL": {
+      "time_s": [
+        6.300000000000285,
+        7.400000000000457
+      ],
+      "sample_count": 111,
+      "contiguous_sample_intervals_s": [
+        [
+          6.300000000000285,
+          7.400000000000457
+        ]
+      ],
+      "torso_max_abs_rpy_deg": [
+        3.747532981768711,
+        0.935137578395319,
+        1.514335899422066
+      ],
+      "pelvis_max_abs_rpy_deg": [
+        0.8304029008574663,
+        1.08007571257441,
+        0.478870197767469
+      ],
+      "com_min_xy_m": [
+        0.33056087576449505,
+        -0.1278654830778277
+      ],
+      "com_max_xy_m": [
+        0.335414758788522,
+        -0.10650387373025982
+      ]
+    },
+    "SETTLE": {
+      "time_s": [
+        7.410000000000458,
+        8.360000000000479
+      ],
+      "sample_count": 96,
+      "contiguous_sample_intervals_s": [
+        [
+          7.410000000000458,
+          8.360000000000479
+        ]
+      ],
+      "torso_max_abs_rpy_deg": [
+        3.0631745645173503,
+        0.3858474206855603,
+        3.0624689983052256
+      ],
+      "pelvis_max_abs_rpy_deg": [
+        0.6305670800505876,
+        0.4538791101754749,
+        0.44296282440019
+      ],
+      "com_min_xy_m": [
+        0.3355036390432302,
+        -0.10587483976262975
+      ],
+      "com_max_xy_m": [
+        0.37601419056285795,
+        -0.012311289164606084
+      ]
+    },
+    "COMPLETE": {
+      "time_s": [
+        8.370000000000477,
+        8.370000000000477
+      ],
+      "sample_count": 1,
+      "contiguous_sample_intervals_s": [
+        [
+          8.370000000000477,
+          8.370000000000477
+        ]
+      ],
+      "torso_max_abs_rpy_deg": [
+        0.44731934044119076,
+        0.13829960130941704,
+        3.0623284630517076
+      ],
+      "pelvis_max_abs_rpy_deg": [
+        0.4366209704614053,
+        0.31411397672648317,
+        0.44317325550028414
+      ],
+      "com_min_xy_m": [
+        0.37607888697206027,
+        -0.011829901200125946
+      ],
+      "com_max_xy_m": [
+        0.37607888697206027,
+        -0.011829901200125946
+      ]
+    }
+  },
+  "paired_report": "logs/posture_experiments/coordinated_swing_up/up_000.json",
+  "load_feedback_available": true,
+  "loaded_threshold_body_weight": 0.6,
+  "loaded_ankles": {
+    "l_ankle_x_joint": {
+      "loaded_sample_count": 337,
+      "peak_abs_deg": 12.969551335693131,
+      "signed_angle_at_peak_deg": 12.969551335693131,
+      "peak_at": {
+        "time_s": 3.0899999999999452,
+        "phase": "LOWER_LEAD"
+      },
+      "load_fraction_at_peak": 1.0051465474996046,
+      "minimum_limit_margin_deg": 7.030686418938513,
+      "samples_within_one_degree_of_limit": 0
+    },
+    "l_ankle_y_joint": {
+      "loaded_sample_count": 337,
+      "peak_abs_deg": 27.36646319233249,
+      "signed_angle_at_peak_deg": -27.36646319233249,
+      "peak_at": {
+        "time_s": 4.02999999999993,
+        "phase": "TRANSFER"
+      },
+      "load_fraction_at_peak": 0.617086448827575,
+      "minimum_limit_margin_deg": 22.633271757553928,
+      "samples_within_one_degree_of_limit": 0
+    },
+    "r_ankle_x_joint": {
+      "loaded_sample_count": 382,
+      "peak_abs_deg": 19.563035500871354,
+      "signed_angle_at_peak_deg": -19.563035500871354,
+      "peak_at": {
+        "time_s": 5.250000000000121,
+        "phase": "LIFT_TRAIL"
+      },
+      "load_fraction_at_peak": 1.1826478183729077,
+      "minimum_limit_margin_deg": 0.4372022537602902,
+      "samples_within_one_degree_of_limit": 16
+    },
+    "r_ankle_y_joint": {
+      "loaded_sample_count": 382,
+      "peak_abs_deg": 41.554138286765145,
+      "signed_angle_at_peak_deg": -41.554138286765145,
+      "peak_at": {
+        "time_s": 5.170000000000108,
+        "phase": "LIFT_TRAIL"
+      },
+      "load_fraction_at_peak": 1.0895575018595318,
+      "minimum_limit_margin_deg": 8.445596663121272,
+      "samples_within_one_degree_of_limit": 0
+    }
+  }
+}

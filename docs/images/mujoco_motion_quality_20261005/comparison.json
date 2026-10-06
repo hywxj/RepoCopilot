@@ -1,0 +1,194 @@
+[
+  {
+    "variant": "BEFORE",
+    "view": "Front",
+    "phase": "LIFT_LEAD",
+    "index": 214,
+    "time": 2.1399999999999655,
+    "pelvis_rpy_deg": [
+      -14.521931798710492,
+      -5.890829224712751,
+      0.45392088989463875
+    ]
+  },
+  {
+    "variant": "BEFORE",
+    "view": "Front",
+    "phase": "SHIFT_TRAIL",
+    "index": 571,
+    "time": 5.710000000000193,
+    "pelvis_rpy_deg": [
+      -12.4466812735859,
+      9.213506043585618,
+      14.644911512614161
+    ]
+  },
+  {
+    "variant": "BEFORE",
+    "view": "Front",
+    "phase": "LOWER_TRAIL",
+    "index": 714,
+    "time": 7.140000000000416,
+    "pelvis_rpy_deg": [
+      12.388577863460895,
+      -3.361467732982318,
+      0.33716773955090096
+    ]
+  },
+  {
+    "variant": "BEFORE",
+    "view": "Front",
+    "phase": "COMPLETE",
+    "index": 951,
+    "time": 9.51000000000025,
+    "pelvis_rpy_deg": [
+      3.9796197732004845,
+      1.651109566570075,
+      5.1792122891340115
+    ]
+  },
+  {
+    "variant": "PELVIS TASK",
+    "view": "Front",
+    "phase": "LIFT_LEAD",
+    "index": 199,
+    "time": 1.9899999999999687,
+    "pelvis_rpy_deg": [
+      -0.2163220454480972,
+      -0.35504671978523045,
+      0.4270164498465761
+    ]
+  },
+  {
+    "variant": "PELVIS TASK",
+    "view": "Front",
+    "phase": "SHIFT_TRAIL",
+    "index": 497,
+    "time": 4.970000000000077,
+    "pelvis_rpy_deg": [
+      0.5347773115503272,
+      0.6815721113392763,
+      0.3093217104616588
+    ]
+  },
+  {
+    "variant": "PELVIS TASK",
+    "view": "Front",
+    "phase": "LOWER_TRAIL",
+    "index": 630,
+    "time": 6.300000000000285,
+    "pelvis_rpy_deg": [
+      -0.012213218750111917,
+      -1.0159416608310405,
+      -0.4286860102022965
+    ]
+  },
+  {
+    "variant": "PELVIS TASK",
+    "view": "Front",
+    "phase": "COMPLETE",
+    "index": 837,
+    "time": 8.370000000000477,
+    "pelvis_rpy_deg": [
+      -0.4366209704614053,
+      0.31411397672648317,
+      0.44317325550028414
+    ]
+  },
+  {
+    "variant": "BEFORE",
+    "view": "Side",
+    "phase": "LIFT_LEAD",
+    "index": 214,
+    "time": 2.1399999999999655,
+    "pelvis_rpy_deg": [
+      -14.521931798710492,
+      -5.890829224712751,
+      0.45392088989463875
+    ]
+  },
+  {
+    "variant": "BEFORE",
+    "view": "Side",
+    "phase": "SHIFT_TRAIL",
+    "index": 571,
+    "time": 5.710000000000193,
+    "pelvis_rpy_deg": [
+      -12.4466812735859,
+      9.213506043585618,
+      14.644911512614161
+    ]
+  },
+  {
+    "variant": "BEFORE",
+    "view": "Side",
+    "phase": "LOWER_TRAIL",
+    "index": 714,
+    "time": 7.140000000000416,
+    "pelvis_rpy_deg": [
+      12.388577863460895,
+      -3.361467732982318,
+      0.33716773955090096
+    ]
+  },
+  {
+    "variant": "BEFORE",
+    "view": "Side",
+    "phase": "COMPLETE",
+    "index": 951,
+    "time": 9.51000000000025,
+    "pelvis_rpy_deg": [
+      3.9796197732004845,
+      1.651109566570075,
+      5.1792122891340115
+    ]
+  },
+  {
+    "variant": "PELVIS TASK",
+    "view": "Side",
+    "phase": "LIFT_LEAD",
+    "index": 199,
+    "time": 1.9899999999999687,
+    "pelvis_rpy_deg": [
+      -0.2163220454480972,
+      -0.35504671978523045,
+      0.4270164498465761
+    ]
+  },
+  {
+    "variant": "PELVIS TASK",
+    "view": "Side",
+    "phase": "SHIFT_TRAIL",
+    "index": 497,
+    "time": 4.970000000000077,
+    "pelvis_rpy_deg": [
+      0.5347773115503272,
+      0.6815721113392763,
+      0.3093217104616588
+    ]
+  },
+  {
+    "variant": "PELVIS TASK",
+    "view": "Side",
+    "phase": "LOWER_TRAIL",
+    "index": 630,
+    "time": 6.300000000000285,
+    "pelvis_rpy_deg": [
+      -0.012213218750111917,
+      -1.0159416608310405,
+      -0.4286860102022965
+    ]
+  },
+  {
+    "variant": "PELVIS TASK",
+    "view": "Side",
+    "phase": "COMPLETE",
+    "index": 837,
+    "time": 8.370000000000477,
+    "pelvis_rpy_deg": [
+      -0.4366209704614053,
+      0.31411397672648317,
+      0.44317325550028414
+    ]
+  }
+]

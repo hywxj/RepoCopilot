@@ -51,12 +51,18 @@ class StepControlCfg:
     max_sole_speed: float = 0.08
     max_slip: float = 0.015
     lift_clearance: float = 0.06
+    crossing_clearance: float = 0.02
+    overlap_swing_lift: bool = False
     lift_duration_s: float = 0.55
     max_lower_speed: float = 0.20
     enter_frames: int = 3
     leg_reach_m: float = 0.64
     leg_reach_reserve_m: float = 0.01
     transfer_body_fraction: float = 0.65
+    # Optional interior CoM-reference region, configured from contact capability.
+    # Zero retains point support for callers without a validated contact model.
+    support_com_half_length_m: float = 0.0
+    support_com_half_width_m: float = 0.0
     touchdown_load_fraction: float = 0.15
     touchdown_contact_fraction: float = 0.003
     touchdown_probe_depth: float = 0.003
@@ -140,6 +146,8 @@ class StairStepController:
         self.reference_feet = np.zeros((2, 3))
         self.reference_root = np.zeros(3)
         self.planted_positions = [None, None]
+        self.source_feet = None
+        self.descent_targets = [None, None]
         self.confirmed_plants = np.zeros(2, dtype=bool)
         self.swing_start = None
         self.last_measurement = None
@@ -251,11 +259,19 @@ class StairStepController:
             pool = centers[valid]
             if not len(pool):
                 return None
+            # The task is to occupy this tread, not two grid-aligned footholds.
+            # Preserve each foot's lateral position whenever the whole sole fits.
+            forward = np.unique(pool[:, 0])
+            aligned = np.column_stack((forward, np.full(len(forward), feet[foot, 1])))
+            aligned = np.array([point for point in aligned
+                                if geometry.footprint_supported(surface.surface_id, point, geometry.heading_rad)])
+            if len(aligned):
+                pool = np.vstack((aligned, pool))
             middle = float(surface.observed_bounds[:, 0].mean())
             if surface.near_edge is not None and surface.far_edge is not None:
                 middle = .5*(surface.near_edge.x_at(feet[foot, 1])+surface.far_edge.x_at(feet[foot, 1]))
             middle += .5*(rear-front)*math.cos(geometry.heading_rad)
-            order = np.argsort((pool[:, 0]-middle)**2 + 4*(pool[:, 1]-feet[foot, 1])**2)
+            order = np.lexsort(((pool[:, 0]-middle)**2, np.abs(pool[:, 1]-feet[foot, 1])))
             pairs.append(pool[order])
         chosen = None
         for left in pairs[0]:
@@ -289,10 +305,29 @@ class StairStepController:
                 and abs(_wrap(previous.heading-current.heading)) <= self.cfg.max_heading_error_rad)
 
     def _reachable_targets(self, m):
-        delta = (self.lock.targets-m.sole_positions) @ m.yaw_rotation
+        delta = (self.execution_targets()-m.sole_positions) @ m.yaw_rotation
         return ((delta[:, 0] >= self.cfg.min_forward_step)
                 & (delta[:, 0] <= self.cfg.max_forward_step)
                 & (np.abs(delta[:, 1]) <= self.cfg.max_lateral_adjustment))
+
+    def execution_targets(self):
+        """Motion references within the tread; confirmed plants stay fixed."""
+        targets = self.lock.targets.copy()
+        for foot in range(2):
+            if self.descent_targets[foot] is not None:
+                targets[foot] = self.descent_targets[foot]
+            if self.confirmed_plants[foot] and self.planted_positions[foot] is not None:
+                targets[foot] = self.planted_positions[foot]
+        return targets
+
+    def _footprint_in_tread(self, m, foot):
+        lock = self.lock
+        position = (m.sole_positions[foot]-lock.root_position) @ lock.rotation
+        rotation = lock.rotation.T @ m.foot_rotations[foot]
+        yaw = math.atan2(rotation[1, 0], rotation[0, 0])
+        separation = ((m.sole_positions[0]-m.sole_positions[1]) @ lock.rotation)[1]
+        return (separation >= self.cfg.min_foot_separation
+                and lock.geometry.footprint_supported(lock.surface_id, position[:2], yaw))
 
     def _physical_support(self, m, foot, min_load=0.12, record_plant=True):
         if m.contact_forces is None or self.lock is None:
@@ -301,19 +336,17 @@ class StairStepController:
         surface = lock.geometry.surfaces[lock.surface_id]
         position = (m.sole_positions[foot]-lock.root_position) @ lock.rotation
         rotation = lock.rotation.T @ m.foot_rotations[foot]
-        yaw = math.atan2(rotation[1, 0], rotation[0, 0])
-        footprint = lock.geometry.footprint_supported(lock.surface_id, position[:2], yaw)
+        footprint = self._footprint_in_tread(m, foot)
         corners = np.array([[-0.12, -0.042, 0], [0.12, -0.042, 0],
                             [0.12, 0.042, 0], [-0.12, 0.042, 0]]) @ rotation.T + position
         plane_error = np.abs(corners @ surface.normal + surface.offset).max()
         tilt = math.acos(float(np.clip(rotation[:, 2] @ surface.normal, -1, 1)))
         force = m.contact_forces[foot]
         loaded = force[2] >= min_load*m.body_weight and force[2] >= 0.75*np.linalg.norm(force)
-        centered = np.linalg.norm(m.sole_positions[foot, :2]-lock.targets[foot, :2]) <= self.cfg.xy_tolerance
         static = np.linalg.norm(m.sole_velocities[foot]) <= self.cfg.max_sole_speed
         planted = self.planted_positions[foot]
         slip = planted is not None and np.linalg.norm(m.sole_positions[foot, :2]-planted[:2]) > self.cfg.max_slip
-        valid = (footprint and plane_error <= self.cfg.height_tolerance and loaded and centered and static
+        valid = (footprint and plane_error <= self.cfg.height_tolerance and loaded and static
                  and tilt <= self.cfg.foot_tilt_tolerance_rad and not slip)
         if valid and planted is None and record_plant:
             self.planted_positions[foot] = m.sole_positions[foot].copy()
@@ -327,7 +360,7 @@ class StairStepController:
         if self.lock is not None:
             for foot in range(2):
                 if self.planted_positions[foot] is not None:
-                    self.reference_feet[foot] = self.lock.targets[foot]
+                    self.reference_feet[foot] = self.planted_positions[foot]
         self.reference_root = m.root_position.copy()
         if phase == StepPhase.OBSERVE:
             # A gait may enter OBSERVE with one foot still airborne. Keep x/y
@@ -440,6 +473,7 @@ class StairStepController:
                 self.lead = int(np.argmin(load))
                 self.initial_root_height = float(m.root_position[2])
                 self.source_height = float(m.sole_positions[:, 2].mean())
+                self.source_feet = m.sole_positions.copy()
                 self._transition(StepPhase.SHIFT_LEAD, m)
             elif not all(self.observe_requirements.values()):
                 self.confirmation_plan = planned
@@ -451,10 +485,13 @@ class StairStepController:
             for surface in geometry.surfaces:
                 if not surface.valid:
                     continue
-                for foot, target in enumerate(self.lock.targets):
+                for foot, target in enumerate(self.execution_targets()):
                     body_target = (target-m.root_position) @ m.yaw_rotation
+                    heading = self.lock.heading
+                    if self.descent_targets[foot] is not None or self.planted_positions[foot] is not None:
+                        heading = math.atan2(m.foot_rotations[foot, 1, 0], m.foot_rotations[foot, 0, 0])
                     if geometry.footprint_supported(surface.surface_id, body_target[:2],
-                                                    _wrap(self.lock.heading-math.atan2(m.yaw_rotation[1, 0], m.yaw_rotation[0, 0]))):
+                                                    _wrap(heading-math.atan2(m.yaw_rotation[1, 0], m.yaw_rotation[0, 0]))):
                         if abs(float(surface.height_at(body_target[:2]))-body_target[2]) > self.cfg.height_tolerance:
                             self._fail("observed_target_height_changed", m)
                             return
@@ -500,7 +537,7 @@ class StairStepController:
         elif self.swing_foot is not None:
             swing = self.swing_foot
             stance = 1-swing
-            target = self.lock.targets[swing]
+            target = self.execution_targets()[swing]
             if m.timestamp-self.lock.last_seen[swing] > self.cfg.flight_occlusion_s:
                 self._fail("swing_target_expired", m)
                 return
@@ -510,8 +547,9 @@ class StairStepController:
             lifting = self.phase in (StepPhase.LIFT_LEAD, StepPhase.LIFT_TRAIL)
             apex = max(float(self.swing_start[2]), float(target[2]))+self.cfg.lift_clearance
             if lifting:
-                # First lift vertically. Horizontal crossing is enabled by
-                # measured WHOLE-sole clearance, not by a timer or reference.
+                # Approach the riser while lifting; cross it only after measured
+                # whole-sole clearance. This avoids a vertical-then-horizontal
+                # box trajectory while retaining the physical clearance gate.
                 corners = np.array([[-0.12, -0.042, 0], [0.12, -0.042, 0],
                                     [0.12, 0.042, 0], [-0.12, 0.042, 0]]) @ m.foot_rotations[swing].T + m.sole_positions[swing]
                 reached = min(apex, max(self.best_lift_height, float(corners[:, 2].min())))
@@ -519,9 +557,25 @@ class StairStepController:
                     self.lift_progress = (reached-self.best_lift_height)/(apex-self.swing_start[2])
                     self.best_lift_height = reached
                 if not self.lift_clearance_confirmed:
-                    self.reference_feet[swing] = self.swing_start.copy()
-                    self.reference_feet[swing, 2] += _smooth(self.elapsed/self.cfg.lift_duration_s)*(apex-self.swing_start[2])
-                    if corners[:, 2].min() >= apex-0.015 and load[swing] <= 0.08:
+                    start = (self.swing_start-self.lock.root_position) @ self.lock.rotation
+                    surface = self.lock.geometry.surfaces[self.lock.surface_id]
+                    geometry_cfg = self.lock.geometry.cfg
+                    radius = math.hypot(.5*(geometry_cfg.foot_front_extent+geometry_cfg.foot_rear_extent),
+                                        geometry_cfg.foot_half_width)
+                    near = (min(surface.near_edge.x_at(start[1]-radius), surface.near_edge.x_at(start[1]+radius))
+                            if surface.near_edge is not None else surface.observed_bounds[0, 0])
+                    approach = start.copy()
+                    approach[0] += max(0., near-radius-geometry_cfg.uncertainty_margin-.01-start[0])
+                    approach = approach @ self.lock.rotation.T+self.lock.root_position
+                    if not self.cfg.overlap_swing_lift:
+                        approach = self.swing_start.copy()
+                    approach[2] = apex
+                    self.reference_feet[swing] = self.swing_start+_smooth(
+                        self.elapsed/self.cfg.lift_duration_s)*(approach-self.swing_start)
+                    clearance = max(float(self.swing_start[2]), float(target[2]))+self.cfg.crossing_clearance
+                    if not self.cfg.overlap_swing_lift:
+                        clearance = apex-.015
+                    if corners[:, 2].min() >= clearance and load[swing] <= 0.08:
                         self.lift_clearance_confirmed = True
                         self.crossing_start = m.sole_positions[swing].copy()
                 else:
@@ -532,8 +586,16 @@ class StairStepController:
                         self.crossing_elapsed/self.cfg.lift_duration_s)*(endpoint-self.crossing_start)
                 arrived = (m.sole_positions[swing, 2] >= apex-0.015
                            and self.lift_clearance_confirmed
-                           and np.linalg.norm(m.sole_positions[swing, :2]-target[:2]) <= self.cfg.xy_tolerance)
+                           and np.linalg.norm(m.sole_velocities[swing, :2]) <= self.cfg.max_sole_speed
+                           and self._footprint_in_tread(m, swing))
                 if arrived:
+                    # Slow down above the tread before descending: braking on
+                    # first entry can pull the sole back outside the safe region.
+                    # Keep this valid point fixed instead of chasing the mark.
+                    position = (m.sole_positions[swing]-self.lock.root_position) @ self.lock.rotation
+                    surface = self.lock.geometry.surfaces[self.lock.surface_id]
+                    position[2] = float(surface.height_at(position[:2]))
+                    self.descent_targets[swing] = position @ self.lock.rotation.T+self.lock.root_position
                     self._transition(StepPhase.LOWER_LEAD if swing == lead else StepPhase.LOWER_TRAIL, m)
             else:
                 # A bounded compliance reference establishes contact; the accepted
@@ -541,6 +603,8 @@ class StairStepController:
                 contact_height = target[2]-self.cfg.touchdown_probe_depth
                 duration = max(0.4, 1.875*abs(self.swing_start[2]-contact_height)/self.cfg.max_lower_speed)
                 self.reference_feet[swing] = target.copy()
+                if self.planted_positions[swing] is not None:
+                    self.reference_feet[swing, :2] = self.planted_positions[swing][:2]
                 self.reference_feet[swing, 2] = self.swing_start[2]+_smooth(self.elapsed/duration)*(contact_height-self.swing_start[2])
                 touched = load[swing] >= 0.12
                 self.unsafe_contact_event = bool(touched and not self.support_valid[swing])
@@ -548,45 +612,68 @@ class StairStepController:
                     self.confirmed_plants[swing] = True
                     self._transition(StepPhase.TRANSFER if swing == lead else StepPhase.SETTLE, m)
         elif self.phase == StepPhase.TRANSFER:
+            targets = self.execution_targets()
             self.reference_root[:2] = (self.reference_feet[trail, :2] + self.cfg.transfer_body_fraction
-                                       * (self.lock.targets[lead, :2]-self.reference_feet[trail, :2]))
-            self.reference_root[2] = self.initial_root_height + float(self.lock.targets[lead, 2])-self.source_height
+                                       * (targets[lead, :2]-self.reference_feet[trail, :2]))
+            self.reference_root[2] = self.initial_root_height + float(targets[lead, 2])-self.source_height
             if self._hold(self.support_valid[lead] and load[lead] >= 0.60 and load[trail] >= 0.08
                           and abs(m.root_velocity[2]) <= 0.10, dt):
                 self._transition(StepPhase.SHIFT_TRAIL, m)
         elif self.phase == StepPhase.SETTLE:
-            self.reference_feet = self.lock.targets.copy()
-            self.reference_root[:2] = self.lock.targets[:, :2].mean(axis=0)
-            self.reference_root[2] = self.initial_root_height + float(self.lock.targets[:, 2].mean())-self.source_height
+            targets = self.execution_targets()
+            self.reference_feet = targets.copy()
+            self.reference_root[:2] = targets[:, :2].mean(axis=0)
+            self.reference_root[2] = self.initial_root_height + float(targets[:, 2].mean())-self.source_height
             done = (self.support_valid.all() and load.min() >= 0.20 and load.sum() >= 0.8
                     and stable and abs(heading_error) <= self.cfg.max_heading_error_rad)
             if self._hold(done, dt, self.cfg.settle_s):
                 self._transition(StepPhase.COMPLETE, m)
                 self.success_event = True
 
+    def _stance_com_anchor(self, stance):
+        """Use an interior support point toward the fixed pre-step stance.
+
+        A planted foot supports an area. Forcing CoM to its exact center before
+        releasing the rear foot unnecessarily extends that rear leg. Keep this
+        anchor fixed during swing; it must not track CoM drift or foot slip.
+        """
+        center = (self.execution_targets()[stance, :2]
+                  if stance == self.lead and self.phase >= StepPhase.SHIFT_TRAIL
+                  else self.reference_feet[stance, :2])
+        if self.source_feet is None:
+            return center.copy()
+        cosine, sine = math.cos(self.lock.heading), math.sin(self.lock.heading)
+        axes = np.array([[cosine, -sine], [sine, cosine]])
+        toward = .5*(self.source_feet[1-stance, :2]-center) @ axes
+        extent = np.array([self.cfg.support_com_half_length_m, self.cfg.support_com_half_width_m])
+        return center+np.clip(toward, -extent, extent) @ axes.T
+
     def constrain_body_reference(self, m):
         if (m.hip_offsets is None or self.lock is None
                 or not StepPhase.SHIFT_LEAD <= self.phase <= StepPhase.SETTLE):
             return
+        targets = self.execution_targets()
         if self.phase <= StepPhase.LOWER_LEAD:
-            anchor = self.reference_feet[1-self.lead, :2]
+            anchor = self._stance_com_anchor(1-self.lead)
         elif self.phase in (StepPhase.SHIFT_TRAIL, StepPhase.LIFT_TRAIL, StepPhase.LOWER_TRAIL):
-            anchor = self.lock.targets[self.lead, :2]
+            anchor = self._stance_com_anchor(self.lead)
         elif self.phase == StepPhase.TRANSFER:
             source = self.reference_feet[1-self.lead, :2]
-            anchor = source+self.cfg.transfer_body_fraction*(self.lock.targets[self.lead, :2]-source)
+            anchor = source+self.cfg.transfer_body_fraction*(targets[self.lead, :2]-source)
         else:
-            anchor = self.lock.targets[:, :2].mean(axis=0)
+            anchor = targets[:, :2].mean(axis=0)
         if self.phase in (StepPhase.LOWER_LEAD, StepPhase.LOWER_TRAIL):
             swing = self.lead if self.phase == StepPhase.LOWER_LEAD else 1-self.lead
             # Do not move CoM outside the stance foot while the other foot is airborne.
             # Light contact permits loading, but never counts as a confirmed plant.
             if self._physical_support(m, swing, min_load=self.cfg.touchdown_contact_fraction, record_plant=False):
-                anchor = anchor+self.cfg.touchdown_load_fraction*(self.lock.targets[swing, :2]-anchor)
+                landing_xy = (self.planted_positions[swing][:2] if self.planted_positions[swing] is not None
+                              else m.sole_positions[swing, :2])
+                anchor = anchor+self.cfg.touchdown_load_fraction*(landing_xy-anchor)
         self.reference_root[:2] = anchor-(m.com_offset[:2] if m.com_offset is not None else 0.)
         nominal = self.initial_root_height
         if self.phase >= StepPhase.TRANSFER:
-            nominal += float(self.lock.targets[:, 2].mean())-self.source_height
+            nominal += float(targets[:, 2].mean())-self.source_height
         ankle_offsets = np.einsum("fij,j->fi", m.foot_rotations, [-.03, 0., .04])
         bounds = [body_height_limit(self.reference_root[:2], m.hip_offsets, feet+ankle_offsets,
                                    self.cfg.leg_reach_m-self.cfg.leg_reach_reserve_m)
@@ -600,7 +687,8 @@ class StairStepController:
         self.constrain_body_reference(m)
         phase = np.eye(len(StepPhase))[int(self.phase)]
         chosen = self.lock if self.lock is not None else self.preview
-        target_error = np.zeros((2, 3)) if chosen is None else (chosen.targets-m.sole_positions) @ m.yaw_rotation
+        targets = self.execution_targets() if self.lock is not None else None if chosen is None else chosen.targets
+        target_error = np.zeros((2, 3)) if targets is None else (targets-m.sole_positions) @ m.yaw_rotation
         reference_error = (self.reference_feet-m.sole_positions) @ m.yaw_rotation
         root_error = (self.reference_root-m.root_position) @ m.yaw_rotation
         yaw = math.atan2(m.yaw_rotation[1, 0], m.yaw_rotation[0, 0])

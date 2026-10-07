@@ -1,52 +1,43 @@
-# TienKung-Lab
+# ELF3：深度平面与可踩踏区域
 
-面向 bxi-elf3 的感知与运动控制研究。目标是**连续、安全、尽量像人类地上下楼**，允许自主调整步长、节奏及必要的并步，不要求每级停稳。
+本分支恢复基于深度图、相机内外参和机器人位姿的显式感知：提取台阶水平面，计算完整脚掌的安全候选，并通过短时地图保留已观测区域。基础版本为 Hiking 实现前的 `e0ec789`；2026-10-08 已在独立目录完成回放验收。
 
-截至 2026-10-07，主线确定为“现有视觉规划 + Hiking 运动学习方法 + ELF3 GMR 先验”。**新连续运动任务尚未实现，尚无通过验收的连续上下楼策略。** 保留平面识别、安全落脚区域、单级 MuJoCo 教师和基础训练工具。
+```mermaid
+flowchart LR
+    A[深度图与相机参数] --> B[反投影与坐标变换]
+    B --> C[局部法向与平面拟合]
+    C --> D[完整脚掌安全候选]
+    E[配对机身位姿] --> F[短时观测地图]
+    C --> F
+    F --> D
+```
+
+![深度平面与完整脚掌候选](docs/images/stair_surfaces_refinement_20261003/down_memory_both_feet_15cm_final.png)
+
+## 直接复现
+
+仓库附带 [5 帧原始样例](examples/perception/stairs_15cm/README.md)，含 RGB、深度、相机参数、配对机身／足部位姿及原始采集时间戳。本机执行：
+
+```bash
+cd /home/hamlet/TienKung-Lab-perception
+/home/hamlet/miniconda3/envs/isaac_sim_env/bin/python -m legged_lab.scripts.replay_stair_surfaces \
+  --input_dirs examples/perception/stairs_15cm \
+  --output_dir logs/perception_restore/demo \
+  --surface_memory --save_images --normal_window_size 7 --normal_radius 4
+```
+
+图像输出到 `logs/perception_restore/demo/stairs_15cm/`，统计为 `logs/perception_restore/demo/report.json`。离线入口使用 NumPy、SciPy、OpenCV、PyTorch，在 CPU 上执行，无需启动 Isaac Sim 或加载策略权重。其他机器从仓库根目录使用自己的 Python 环境运行相同模块。
+
+## 验收与范围
+
+- 5 帧随仓库样例：98 个候选，净距与高度违规均为 0；下楼四个连续观察后，下一阶 29 个候选，左右各 8 个。
+- 本地完整 52 帧回放：13,043 个候选，两项违规均为 0。
+- 核心感知测试：44 项、4 项子测试通过。
+
+绿色表示观测覆盖和整脚几何条件成立；实际可达性、接触承重和动态行走需要另行验收。真值只用于输出后的独立审计，不参与平面识别或候选选择。上述数据来自仿真 RGB-D，物理 D435i 接入仍待验证。
 
 | 文档 | 内容 |
-| --- | --- |
-| [新主线](docs/hiking_mainline.md) | 设计、实施顺序、通行与自然性验收 |
-| [感知](docs/perception.md) | 平面、安全区域、短时地图与复现 |
-| [MuJoCo 教师](docs/mujoco_action_teacher.md) | 动态、深度与 20 ms 位置教师 |
-| [数据与训练](docs/data_and_training.md) | 541 条 GMR、教师数据合同与工具 |
-| [清理记录](docs/cleanup_20261007.md) | 保留资产与已移除实验 |
-
-## 环境
-
-现有基础栈：Python 3.10、PyTorch 2.5.1/cu121、Isaac Sim 4.5.0、Isaac Lab 2.1.0。本机环境为 `conda activate isaac_sim_env`；新机器可从仓库根目录按以下顺序安装：
-
-```bash
-conda create -n tglab python=3.10
-conda activate tglab
-pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
-pip install --upgrade pip setuptools wheel
-pip install 'isaacsim[all,extscache]==4.5.0' --extra-index-url https://pypi.nvidia.com
-sudo apt install cmake build-essential
-git clone --branch v2.1.0 https://github.com/isaac-sim/IsaacLab.git
-cd IsaacLab
-./isaaclab.sh --install
-cd ..
-pip install -e .
-pip install -e rsl_rl
-pip install qpsolvers quadprog scipy pyyaml opencv-python
-```
-
-MuJoCo 教师使用 `mujoco==3.3.2`（项目依赖已声明），不需要启动 Isaac Sim。官方 InstinctLab/instinct_rl 当前依赖与此环境不同，整套复现应使用独立环境和相容提交。
-
-## 常用入口
-
-在仓库根目录和已配置的 Python 环境中运行：
-
-```bash
-# 现有基础 AMP 任务，不是新连续楼梯训练入口
-python legged_lab/scripts/train.py --task=walk_elf3 --headless --logger=tensorboard --num_envs=256
-
-# 查看单级物理教师；下楼改为 --direction down
-python -m legged_lab.scripts.mujoco_stair_teacher --controller dynamic --direction up --loop
-
-# 采集固定 20 ms 位置教师上下楼示范
-python -m legged_lab.scripts.mujoco_stair_position_teacher --direction both --supervisor event --geometry_source known --headless --duration 40 --output_dir logs/teacher_runs/event_nominal
-```
-
-`--loop` 会重置后重复单级动作，不代表连续楼梯。感知回放、深度教师和数据转换入口见对应文档。新主线没有可运行的训练命令；旧学生试验入口及中间训练产物已按清理记录移除。
+|---|---|
+| [感知说明](docs/perception.md) | 参数、代码入口、完整数据回放与 RTX 采集 |
+| [历史改进报告](docs/stair_surface_refinement_report.md) | 恢复的 2026-10-03 报告与原始图片 |
+| [样例清单](examples/perception/stairs_15cm/manifest.json) | 原始来源、时间戳与逐文件 SHA256 |

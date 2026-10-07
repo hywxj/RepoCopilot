@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "validated_on": "2026-10-08",
+  "perception_base_commit": "e0ec789",
+  "input_manifest": "manifest.json",
+  "scope": "Offline geometric candidate audit on saved simulated RGB-D frames; does not validate dynamic stepping or real-camera operation",
+  "options": {
+    "surface_memory": true,
+    "normal_window_size": 7,
+    "normal_radius": 4
+  },
+  "memory_replay_uses_only_saved_frames_not_every_live_camera_frame": true,
+  "frames": 5,
+  "safe_centers": 98,
+  "truth_violations": 0,
+  "height_violations": 0,
+  "cases": [
+    {
+      "case": "down_middle_nominal_15cm",
+      "source": "raw/down_middle_nominal_15cm.npz",
+      "direction": -1,
+      "memory_frame_count": 1,
+      "safe_centers": 0,
+      "truth_violations": 0,
+      "height_violations": 0,
+      "observed_next_tread_centers": 0,
+      "next_tread_lateral_coverage": {
+        "centers": 0,
+        "left_centers": 0,
+        "right_centers": 0,
+        "both_feet_same_surface": false,
+        "lateral_adjustment_m": 0.08
+      }
+    },
+    {
+      "case": "down_middle_yaw8_15cm",
+      "source": "raw/down_middle_yaw8_15cm.npz",
+      "direction": -1,
+      "memory_frame_count": 2,
+      "safe_centers": 0,
+      "truth_violations": 0,
+      "height_violations": 0,
+      "observed_next_tread_centers": 0,
+      "next_tread_lateral_coverage": {
+        "centers": 0,
+        "left_centers": 0,
+        "right_centers": 0,
+        "both_feet_same_surface": false,
+        "lateral_adjustment_m": 0.08
+      }
+    },
+    {
+      "case": "down_middle_pitch8_15cm",
+      "source": "raw/down_middle_pitch8_15cm.npz",
+      "direction": -1,
+      "memory_frame_count": 3,
+      "safe_centers": 8,
+      "truth_violations": 0,
+      "height_violations": 0,
+      "observed_next_tread_centers": 7,
+      "next_tread_lateral_coverage": {
+        "centers": 7,
+        "left_centers": 2,
+        "right_centers": 0,
+        "both_feet_same_surface": false,
+        "lateral_adjustment_m": 0.08
+      }
+    },
+    {
+      "case": "down_middle_prestep_view_15cm",
+      "source": "raw/down_middle_prestep_view_15cm.npz",
+      "direction": -1,
+      "memory_frame_count": 4,
+      "safe_centers": 32,
+      "truth_violations": 0,
+      "height_violations": 0,
+      "observed_next_tread_centers": 29,
+      "next_tread_lateral_coverage": {
+        "centers": 29,
+        "left_centers": 8,
+        "right_centers": 8,
+        "both_feet_same_surface": true,
+        "lateral_adjustment_m": 0.08
+      }
+    },
+    {
+      "case": "up_middle_nominal_15cm",
+      "source": "raw/up_middle_nominal_15cm.npz",
+      "direction": 1,
+      "memory_frame_count": 1,
+      "safe_centers": 58,
+      "truth_violations": 0,
+      "height_violations": 0,
+      "observed_next_tread_centers": 9,
+      "next_tread_lateral_coverage": {
+        "centers": 9,
+        "left_centers": 1,
+        "right_centers": 0,
+        "both_feet_same_surface": false,
+        "lateral_adjustment_m": 0.08
+      }
+    }
+  ]
+}

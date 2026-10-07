@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "capture_date": "2026-10-03",
+  "source": "Isaac RTX simulated RGB-D with paired camera, root and foot poses",
+  "source_capture": "logs/stair_surfaces_32cm/refinement_20261003_15cm_final_seed42",
+  "selection": "One upstairs frame and the four recorded downstairs middle views, preserving original timestamps and reset generations",
+  "truth_usage": "Independent audit only; plane extraction and safe-center selection use observed depth and poses",
+  "files": [
+    {
+      "path": "raw/up_middle_nominal_15cm.npz",
+      "bytes": 3177416,
+      "sha256": "fa44e98d36b8442598652ba2ec9b8cac71850ea738af550d3ac7293c4d093442",
+      "sequence_id": "up_middle",
+      "timestamp_s": 0.6599999666213989,
+      "memory_generation": 1
+    },
+    {
+      "path": "raw/down_middle_nominal_15cm.npz",
+      "bytes": 3076782,
+      "sha256": "8342694d981b10b77b64e230499a3e84905a40d2bdc4aec5253a42bc529ddf40",
+      "sequence_id": "down_middle",
+      "timestamp_s": 2.3099989891052246,
+      "memory_generation": 4
+    },
+    {
+      "path": "raw/down_middle_yaw8_15cm.npz",
+      "bytes": 3151831,
+      "sha256": "fe2d47415968ea0f7d953de281cb7d513f5dbbdc5c17d39334c79ac42c5eb67b",
+      "sequence_id": "down_middle",
+      "timestamp_s": 2.474998950958252,
+      "memory_generation": 4
+    },
+    {
+      "path": "raw/down_middle_pitch8_15cm.npz",
+      "bytes": 3126274,
+      "sha256": "f9d0b68bb5b5298e7370d457145f7c75e2db3d8c25b98d4e67b6eff4615fba24",
+      "sequence_id": "down_middle",
+      "timestamp_s": 2.6399989128112793,
+      "memory_generation": 4
+    },
+    {
+      "path": "raw/down_middle_prestep_view_15cm.npz",
+      "bytes": 3112014,
+      "sha256": "2e559ec838bd25fd15e1ea8ebcc09aee7e73268ddc5f491f401a1f8293227d9c",
+      "sequence_id": "down_middle",
+      "timestamp_s": 2.8049988746643066,
+      "memory_generation": 4
+    }
+  ]
+}

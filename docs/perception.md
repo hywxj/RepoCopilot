@@ -1,5 +1,7 @@
 # 台阶平面与完整脚掌安全区域
 
+2026-10-08：本分支以 `e0ec789` 恢复独立感知入口，保留该版本的几何修正与原图。完整历史见[改进报告](stair_surface_refinement_report.md)，随仓库样例见[数据说明](../examples/perception/stairs_15cm/README.md)。
+
 ## 已实现与边界
 
 深度反投影、局部法向排除立面、水平面拟合、整脚安全区域、位姿补偿短时地图和独立真值审计已实现。源数据来自 Isaac RTX 或 MuJoCo 渲染；尚未完成物理 D435i 与真实状态估计误差验收。
@@ -28,7 +30,15 @@
 
 ## 复现
 
-从仓库根目录、已配置环境离线回放保存数据，无需启动 Isaac Sim：
+从仓库根目录、已配置环境回放随仓库提供的 5 帧数据，无需启动 Isaac Sim：
+
+```bash
+python -m legged_lab.scripts.replay_stair_surfaces --input_dirs examples/perception/stairs_15cm --output_dir logs/perception_restore/demo --surface_memory --save_images --normal_window_size 7 --normal_radius 4
+```
+
+本次验证为 98 个候选、净距／高度违规均为 0；下楼最后一帧下一阶 29 个候选，左右各 8 个。核心感知测试 44 项、4 项子测试通过。图像输出在 `logs/perception_restore/demo/stairs_15cm/`。
+
+本机另保留完整历史数据，已在新目录的忽略目录 `logs/` 下链接原始数据与基础采样权重。完整 52 帧离线回放为 13,043 个候选，两项违规均为 0；离线只处理保存帧，不能与在线每帧累积的 14,035 个候选直接比较。完整数据命令：
 
 ```bash
 python -m legged_lab.scripts.replay_stair_surfaces --input_dirs logs/stair_surfaces_32cm/refinement_20261003_15cm_final_seed42 --output_dir logs/perception_runs/replay_15cm --surface_memory --save_images --normal_window_size 7 --normal_radius 4

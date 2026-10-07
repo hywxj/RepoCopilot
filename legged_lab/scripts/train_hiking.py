@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from legged_lab.hiking.bootstrap import ROOT, activate
+from legged_lab.hiking.checkpoint_config import load_checkpoint_action_scale
 
 
 def main():
@@ -23,13 +24,18 @@ def main():
     parser.add_argument("--max_iterations", type=int, default=30000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--run_name", default="")
-    parser.add_argument("--resume", type=Path)
+    parser.add_argument("--resume", type=Path, help="Resume with the checkpoint's saved action scales; omit for new defaults.")
     parser.add_argument("--check", action="store_true", help="Verify depth/AMP and parameter updates during a short run.")
     parser.add_argument("--log_dir", type=Path)
     AppLauncher.add_app_launcher_args(parser)
     args = parser.parse_args()
     if args.num_envs < 4 or args.max_iterations < 1:
         parser.error("Use at least 4 environments and one training iteration")
+    if args.resume:
+        args.resume = args.resume.expanduser().resolve()
+        if not args.resume.is_file():
+            parser.error(f"Resume checkpoint does not exist: {args.resume}")
+    checkpoint_scale = load_checkpoint_action_scale(args.resume) if args.resume else None
     app = AppLauncher(args).app
     env = None
     failed = False
@@ -44,6 +50,8 @@ def main():
 
         torch.backends.cuda.matmul.allow_tf32 = True
         cfg = Elf3HikingEnvCfg()
+        if checkpoint_scale is not None:
+            cfg.actions.joint_pos.scale = checkpoint_scale
         cfg.seed = args.seed
         cfg.scene.num_envs = args.num_envs
         if args.device:
@@ -65,6 +73,9 @@ def main():
             "upstream": upstream, "python": platform.python_version(), "torch": torch.__version__,
             "seed": args.seed, "num_envs": args.num_envs, "iterations": args.max_iterations,
             "resume": str(args.resume) if args.resume else None,
+            "action_scale_source": str(args.resume.expanduser().resolve().parent / "params/env.yaml")
+                                   if args.resume else "training_defaults",
+            "action_scale": cfg.actions.joint_pos.scale,
             "source_sha256": {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
                               for p in (ROOT / "legged_lab/hiking").glob("*.py")},
             "observation_source": "simulated noisy depth history and proprioception",
@@ -75,6 +86,8 @@ def main():
         provenance["source_sha256"][str(Path(__file__).relative_to(ROOT))] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
         (log_dir / "provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
         print(f"HIKING_LOG_DIR={log_dir}", flush=True)
+        print(f"HIKING_ACTION_SCALE_SOURCE={provenance['action_scale_source']}\n"
+              f"HIKING_ACTION_SCALE={json.dumps(cfg.actions.joint_pos.scale)}", flush=True)
         env = InstinctRlVecEnvWrapper(InstinctRlEnv(cfg=cfg))
         runner = HikingRunner(env, agent.to_dict(), log_dir=str(log_dir), device=agent.device)
         runner.add_git_repo_to_log(__file__)

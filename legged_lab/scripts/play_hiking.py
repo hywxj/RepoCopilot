@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 from legged_lab.hiking.bootstrap import ROOT, activate
+from legged_lab.hiking.checkpoint_config import load_checkpoint_action_scale
 
 
 def resolve_checkpoint(requested=None):
@@ -108,6 +109,7 @@ def main():
     if args.headless and args.steps == 0:
         args.steps = 500
     checkpoint = resolve_checkpoint(args.checkpoint)
+    checkpoint_scale = load_checkpoint_action_scale(checkpoint)
     output = (args.output_dir or ROOT / "logs/elf3_hiking/playbacks" / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")).resolve()
     output.mkdir(parents=True, exist_ok=True)
     print(f"HIKING_PLAY_CHECKPOINT={checkpoint}\nHIKING_PLAY_OUTPUT={output}", flush=True)
@@ -138,6 +140,8 @@ def main():
         from legged_lab.hiking.runner import HikingRunner
 
         cfg = Elf3HikingEnvCfg()
+        cfg.actions.joint_pos.scale = checkpoint_scale
+        print(f"HIKING_PLAY_ACTION_SCALE={json.dumps(checkpoint_scale)}", flush=True)
         cfg.seed = args.seed
         cfg.scene.num_envs = args.num_envs
         # Replay uses only a few robots. Training-sized broad-phase buffers
@@ -313,6 +317,8 @@ def main():
         np.savez_compressed(output / "depth_latest.npz", raw_depth_m=raw, policy_depth_history=history)
         report = {
             "checkpoint": str(checkpoint), "checkpoint_iteration": checkpoint_iteration,
+            "action_scale_source": str(checkpoint.parent / "params/env.yaml"),
+            "action_scale": checkpoint_scale,
             "steps": steps, "num_envs": args.num_envs, "simulated_seconds_per_environment": steps * base.step_dt,
             "wall_seconds": time.monotonic() - started, "terrain_requested": args.terrain,
             "terrain_environment_assignments": assignments, "completed_episodes_per_env": resets.tolist(),

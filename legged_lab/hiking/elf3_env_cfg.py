@@ -28,6 +28,10 @@ ELF3_LINKS = ["torso_link"] + [name.removesuffix("_joint") + "_link" for name in
 ELF3_LEG_JOINTS = [name for name in JOINT_NAMES if any(
     part in name for part in ("_hip_", "_knee_", "_ankle_"))]
 ELF3_UPPER_JOINTS = [name for name in JOINT_NAMES if name not in ELF3_LEG_JOINTS]
+ELF3_ACTION_SCALE_OVERRIDES = {
+    "l_hip_y_joint": .38, "r_hip_y_joint": .38,
+    "l_knee_y_joint": .40, "r_knee_y_joint": .40,
+}
 
 
 def _named_parameter(value, joint_name, parameter):
@@ -48,7 +52,9 @@ def make_elf3_hiking_robot():
     ELF3's low-inertia ankles/wrists are unstable when its original implicit
     gains are copied into explicit PD at 5ms. Target delay belongs to the action
     term; feedback remains with the original PhysX implicit actuators. Action
-    amplitudes use the official ``0.25 * effort_limit / stiffness`` rule.
+    amplitudes start with the official ``0.25 * effort_limit / stiffness`` rule.
+    Larger named hip-pitch/knee amplitudes are an ELF3 stepping experiment;
+    they are not the retained blind policy's original action mapping.
     """
     robot = deepcopy(ELF3LITE_CFG).replace(prim_path="{ENV_REGEX_NS}/Robot")
     action_scale = {}
@@ -65,6 +71,7 @@ def make_elf3_hiking_robot():
             action_scale[name] = 0.25 * effort[name] / stiffness[name]
     if set(action_scale) != set(JOINT_NAMES):
         raise ValueError("ELF3 Hiking must actuate all 29 joints exactly once")
+    action_scale.update(ELF3_ACTION_SCALE_OVERRIDES)
     return robot, action_scale
 
 

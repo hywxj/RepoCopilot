@@ -1,6 +1,6 @@
 # ELF3：直接迁移 Hiking in the Wild
 
-更新：2026-10-07。主线改为官方 InstinctLab parkour + instinct_rl，适配 ELF3 身体与本地 GMR；视觉和控制从同一次训练开始学习。迁移运行结果见[数据与训练](data_and_training.md)。
+更新：2026-10-07。主线改为官方 InstinctLab parkour + instinct_rl，适配 ELF3 身体与本地 GMR；视觉和控制从同一次训练开始学习。当前训练已停止，`model_4300.pt` 回放未展示有效连续行走。动作尺度、数据来源及本次髋膝调整见[迁移核查](hiking_audit_20261007.md)，运行记录见[数据与训练](data_and_training.md)。
 
 ## 目标与结构
 

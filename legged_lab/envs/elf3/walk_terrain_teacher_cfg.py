@@ -334,7 +334,7 @@ class Elf3WalkGeometryFusionAgentCfg(Elf3WalkStairsCurriculumAgentCfg):
     neptune_project = "walk_elf3_geometry_fusion"
     wandb_project = "walk_elf3_geometry_fusion"
     resume = True
-    load_run = "2026-09-19_12-54-59_elf3_atec_blind_final_v18_1024env_3k"
+    load_run = "elf3_blind_v18"
     load_checkpoint = "model_43600.pt"
 
     policy = copy.deepcopy(Elf3WalkStairsCurriculumAgentCfg().policy)
@@ -399,7 +399,7 @@ class Elf3WalkGeometryStairsDownFullControlAgentCfg(Elf3WalkGeometryStairsDownBo
     """Learn a stair gait while the frozen blind actor remains the flat-ground fallback."""
 
     run_name = "elf3_geometry_stairs_down_full_control"
-    load_run = "2026-09-19_12-54-59_elf3_atec_blind_final_v18_1024env_3k"
+    load_run = "elf3_blind_v18"
     load_checkpoint = "model_43997.pt"
     policy = copy.deepcopy(Elf3WalkGeometryStairsDownBootstrapAgentCfg().policy)
     policy.residual_scale = 0.80

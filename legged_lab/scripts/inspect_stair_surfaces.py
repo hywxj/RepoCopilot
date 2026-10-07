@@ -23,7 +23,7 @@ parser.add_argument("--surface_memory", action="store_true")
 parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--normal_window_size", type=int, default=7)
 parser.add_argument("--normal_radius", type=int, default=4)
-parser.add_argument("--checkpoint", default="logs/walk/2026-09-19_12-54-59_elf3_atec_blind_final_v18_1024env_3k/model_43997.pt")
+parser.add_argument("--checkpoint", default="logs/retained/baselines/elf3_blind_v18/model_43997.pt")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 args.enable_cameras = True

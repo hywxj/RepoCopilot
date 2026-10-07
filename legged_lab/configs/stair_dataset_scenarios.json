@@ -1,0 +1,13 @@
+{
+  "description": "Declared initial conditions for single-step position-control collection. Acceptance is recorded per episode; a listed scenario is not a success claim.",
+  "scenarios": [
+    {"name": "up_forward_45mm", "direction": "up", "initial_forward_offset": 0.045, "dataset_split": "train"},
+    {"name": "up_forward_55mm", "direction": "up", "initial_forward_offset": 0.055, "dataset_split": "validation"},
+    {"name": "up_lateral_2mm", "direction": "up", "initial_lateral_offset": 0.002, "dataset_split": "train"},
+    {"name": "up_yaw_0p3deg", "direction": "up", "initial_yaw": 0.0052359878, "dataset_split": "train"},
+    {"name": "down_forward_45mm", "direction": "down", "initial_forward_offset": 0.045, "dataset_split": "train"},
+    {"name": "down_forward_55mm", "direction": "down", "initial_forward_offset": 0.055, "dataset_split": "validation"},
+    {"name": "down_lateral_2mm", "direction": "down", "initial_lateral_offset": 0.002, "dataset_split": "train"},
+    {"name": "down_yaw_0p3deg", "direction": "down", "initial_yaw": 0.0052359878, "dataset_split": "train"}
+  ]
+}

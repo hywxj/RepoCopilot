@@ -1,0 +1,45 @@
+# Position/observation contract from ELF3LITE_CFG and Elf3WalkEnvCfg (2026-10-06).
+# The action-scale list is in Isaac articulation order, not MuJoCo motor order.
+# MuJoCo keeps the original XML torque limits; this file does not raise them.
+scene:
+  robot:
+    init_state:
+      joint_pos:
+        waist_.*_joint: 0.0
+        .*_hip_y_joint: -0.22
+        .*_hip_[xz]_joint: 0.0
+        .*_knee_y_joint: 0.44
+        .*_ankle_y_joint: -0.22
+        .*_ankle_x_joint: 0.0
+        .*_shoulder_y_joint: 0.2
+        l_shoulder_x_joint: 0.035
+        r_shoulder_x_joint: -0.035
+        .*_shoulder_z_joint: 0.0
+        .*_elbow_y_joint: 0.3
+        .*_wrist_.*_joint: 0.0
+    actuators:
+      waist:
+        stiffness: {waist_y_joint: 108.448, waist_x_joint: 162.672, waist_z_joint: 176.421}
+        damping: {waist_y_joint: 7.8, waist_x_joint: 11.8, waist_z_joint: 11.231}
+      legs:
+        stiffness: {'.*_hip_y_joint': 175.0, '.*_hip_x_joint': 165.0, '.*_hip_z_joint': 70.0, '.*_knee_y_joint': 205.0}
+        damping: {'.*_hip_y_joint': 8.0, '.*_hip_x_joint': 9.5, '.*_hip_z_joint': 4.2, '.*_knee_y_joint': 8.0}
+      feet:
+        stiffness: {'.*_ankle_y_joint': 55.0, '.*_ankle_x_joint': 30.0}
+        damping: {'.*_ankle_y_joint': 3.5, '.*_ankle_x_joint': 2.5}
+      arms:
+        stiffness: {'.*_shoulder_y_joint': 48.0, '.*_shoulder_x_joint': 74.0, '.*_shoulder_z_joint': 30.0, '.*_elbow_y_joint': 42.0}
+        damping: {'.*_shoulder_y_joint': 2.6, '.*_shoulder_x_joint': 4.6, '.*_shoulder_z_joint': 2.2, '.*_elbow_y_joint': 2.4}
+      wrist:
+        stiffness: {'.*_wrist_.*_joint': 16.747}
+        damping: {'.*_wrist_.*_joint': 1.066}
+robot:
+  action_scale: [.231, .154, .213, .380, .220, .240, .400, .350, .220,
+                 .380, .220, .240, .400, .350, .220, .420, .070, .180,
+                 .340, .373, .373, .373, .420, .070, .180, .340, .373, .373, .373]
+  actor_obs_history_length: 10
+sim: {dt: .005, decimation: 4}
+normalization:
+  obs_scales: {ang_vel: 1.0, projected_gravity: 1.0, commands: 1.0, joint_pos: 1.0, joint_vel: 1.0, actions: 1.0}
+  clip_actions: 100.0
+  clip_observations: 100.0

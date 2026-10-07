@@ -18,7 +18,7 @@ parser.add_argument("--require_successes", type=int, default=0,
 parser.add_argument("--initial_yaw_deg", type=float, default=0., help="Initial yaw error for an alignment check.")
 parser.add_argument("--disable_alignment", action="store_true", help="Keep OBSERVE commands at zero for comparison.")
 parser.add_argument("--output_dir", default="logs/stair_step_phase2")
-parser.add_argument("--checkpoint", default="logs/walk/2026-09-19_12-54-59_elf3_atec_blind_final_v18_1024env_3k/model_43997.pt")
+parser.add_argument("--checkpoint", default="logs/retained/baselines/elf3_blind_v18/model_43997.pt")
 AppLauncher.add_app_launcher_args(parser)
 args = parser.parse_args()
 args.enable_cameras = not args.motor_only

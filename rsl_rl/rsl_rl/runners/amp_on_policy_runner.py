@@ -41,6 +41,18 @@ from rsl_rl.modules import (
 from rsl_rl.utils import AMPLoader, Normalizer, store_code_state
 
 
+def _create_amp_loader(env, train_cfg, device):
+    manifest = train_cfg.get("amp_motion_manifest")
+    if manifest is not None:
+        from rsl_rl.utils.gmr_motion_loader import GMRMotionLoader
+
+        return GMRMotionLoader(device, time_between_frames=env.step_dt,
+                               manifest_path=manifest, split="train", seed=train_cfg.get("seed"))
+    return AMPLoader(device, time_between_frames=env.step_dt, preload_transitions=True,
+                     num_preload_transitions=train_cfg["amp_num_preload_transitions"],
+                     motion_files=train_cfg["amp_motion_files"])
+
+
 class AmpOnPolicyRunner:
     """On-policy runner for training and evaluation."""
 
@@ -109,13 +121,7 @@ class AmpOnPolicyRunner:
             self.alg_cfg["symmetry_cfg"]["_env"] = env
 
         # init amp loader
-        amp_data = AMPLoader(
-            device,
-            time_between_frames=self.env.step_dt,
-            preload_transitions=True,
-            num_preload_transitions=train_cfg["amp_num_preload_transitions"],
-            motion_files=train_cfg["amp_motion_files"],
-        )
+        amp_data = _create_amp_loader(self.env, train_cfg, device)
         amp_normalizer = Normalizer(amp_data.observation_dim)
         discriminator = Discriminator(
             amp_data.observation_dim * 2,

@@ -55,6 +55,52 @@ def footprint_cells(offset_xy, yaw, cfg, margins):
             & (np.abs(delta[..., 1]) < abs(sine)*length + abs(cosine)*width + half_cell - 1.0e-8))
 
 
+def _footprint_grid_window(grid_xy, polygon, grid_size):
+    """Conservative broad phase for the extractor's axis-aligned regular grid.
+
+    Validate the live coordinates, not a cached assumption: callers may supply
+    or modify custom grids. The original full-grid predicate remains the safe
+    fallback. No contact-area epsilon belongs in this broad phase.
+    """
+    whole = (slice(None),) * (grid_xy.ndim - 1)
+    if (grid_xy.ndim != 3 or grid_xy.shape[-1] != 2 or min(grid_xy.shape[:2]) < 2
+            or not np.isfinite(grid_size) or grid_size <= 0 or not np.isfinite(polygon).all()):
+        return whole
+    x, y = grid_xy[:, 0, 0], grid_xy[0, :, 1]
+    tolerance = max(1.e-12, grid_size*1.e-12)
+    dx, dy = np.diff(x), np.diff(y)
+    if (not np.all((dx > 0) & (np.abs(dx-grid_size) <= tolerance))
+            or not np.all((dy > 0) & (np.abs(dy-grid_size) <= tolerance))
+            or not np.all(grid_xy[..., 0] == x[:, None])
+            or not np.all(grid_xy[..., 1] == y[None, :])):
+        return whole
+    lower = polygon.min(axis=0) - .5*grid_size
+    upper = polygon.max(axis=0) + .5*grid_size
+    # Retain one neighbouring row/column for arithmetic rounding at a bound.
+    # These extra cells still pass through the unchanged strict SAT below.
+    return tuple(slice(max(0, int(np.searchsorted(axis, lower[i], side="left"))-1),
+                       min(len(axis), int(np.searchsorted(axis, upper[i], side="right"))+1))
+                 for i, axis in enumerate((x, y)))
+
+
+def footprint_mask_supported(grid_xy, observed_mask, center, yaw, cfg, margins):
+    """Original whole-foot support query, with only its SAT candidates cropped."""
+    rear, front, side = margins
+    half_length = .5*(cfg.foot_rear_extent+cfg.foot_front_extent)
+    width = cfg.foot_half_width+side
+    polygon = np.array([[-half_length-rear, -width], [half_length+front, -width],
+                        [half_length+front, width], [-half_length-rear, width]])
+    rotation = np.array([[math.cos(yaw), -math.sin(yaw)], [math.sin(yaw), math.cos(yaw)]])
+    center = np.asarray(center)
+    polygon = polygon @ rotation.T+center
+    if (polygon[:, 0].min() < cfg.min_forward or polygon[:, 0].max() > cfg.max_forward
+            or np.abs(polygon[:, 1]).max() > cfg.lateral_half_width):
+        return False
+    window = _footprint_grid_window(grid_xy, polygon, cfg.grid_size)
+    covered = footprint_cells(grid_xy[window]-center, yaw, cfg, margins)
+    return bool(covered.any() and observed_mask[window][covered].all())
+
+
 @dataclass
 class SurfaceValidationCfg:
     min_forward: float = 0.15
@@ -148,19 +194,9 @@ class SurfaceGeometryResult:
         surface = next((s for s in self.surfaces if s.surface_id == surface_id), None)
         if surface is None or not surface.valid:
             return False
-        rear, front, side = self.support_margins() if include_margin else (0.0, 0.0, 0.0)
-        half_length = 0.5 * (self.cfg.foot_rear_extent + self.cfg.foot_front_extent)
-        width = self.cfg.foot_half_width + side
-        polygon = np.array([[-half_length-rear, -width], [half_length+front, -width],
-                            [half_length+front, width], [-half_length-rear, width]])
-        rotation = np.array([[math.cos(yaw), -math.sin(yaw)],
-                             [math.sin(yaw), math.cos(yaw)]])
-        polygon = polygon @ rotation.T + np.asarray(sole_center_xy)
-        if (polygon[:, 0].min() < self.cfg.min_forward or polygon[:, 0].max() > self.cfg.max_forward
-                or np.abs(polygon[:, 1]).max() > self.cfg.lateral_half_width):
-            return False
-        footprint = footprint_cells(self.grid_xy - np.asarray(sole_center_xy), yaw, self.cfg, (rear, front, side))
-        return bool(footprint.any() and surface.observed_mask[footprint].all())
+        margins = self.support_margins() if include_margin else (0.0, 0.0, 0.0)
+        return footprint_mask_supported(self.grid_xy, surface.observed_mask, sole_center_xy, yaw,
+                                        self.cfg, margins)
 
 
 class TreadSurfaceExtractor:

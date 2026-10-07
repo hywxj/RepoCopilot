@@ -1,5 +1,7 @@
 import unittest
 import copy
+import json
+import math
 from unittest.mock import patch
 
 import numpy as np
@@ -538,6 +540,95 @@ class StairStepTest(unittest.TestCase):
         angle = np.deg2rad(10)
         m.foot_rotations[0] = [[np.cos(angle), 0, np.sin(angle)], [0, 1, 0], [-np.sin(angle), 0, np.cos(angle)]]
         self.assertFalse(c._physical_support(m, 0))
+
+    def test_support_metrics_classify_failures_without_recording_a_plant(self):
+        c, _, initial = self.locked()
+        initial.sole_positions = c.lock.targets.copy()
+        valid = c.physical_support_metrics(initial, 0)
+        self.assertTrue(valid["valid"])
+        self.assertIsNone(c.planted_positions[0])
+        json.dumps(valid, allow_nan=False)
+        cases = {
+            "region": lambda m: m.sole_positions.__setitem__((0, 0), .25),
+            "plane": lambda m: m.sole_positions.__setitem__((0, 2), initial.sole_positions[0, 2]+.021),
+            "load": lambda m: m.contact_forces.__setitem__((0, 2), .119*m.body_weight),
+            "force_direction": lambda m: m.contact_forces.__setitem__((0, 0), 600.),
+            "speed": lambda m: m.sole_velocities.__setitem__((0, 0), .081),
+            "tilt": lambda m: m.foot_rotations.__setitem__(0,
+                [[math.cos(.13), 0, math.sin(.13)], [0, 1, 0], [-math.sin(.13), 0, math.cos(.13)]]),
+        }
+        for reason, change in cases.items():
+            with self.subTest(reason=reason):
+                measured = copy.deepcopy(initial)
+                change(measured)
+                support = c.physical_support_metrics(measured, 0)
+                self.assertEqual(support["failed_conditions"], [reason])
+                self.assertFalse(c._physical_support(measured, 0))
+                self.assertIsNone(c.planted_positions[0])
+                json.dumps(support, allow_nan=False)
+        # Slip compares with the fixed recorded plant, not the moving reference.
+        c.planted_positions[0] = initial.sole_positions[0]-[0., .016, 0.]
+        plant = c.planted_positions[0].copy()
+        self.assertEqual(c.physical_support_metrics(initial, 0)["failed_conditions"], ["slip"])
+        np.testing.assert_array_equal(c.planted_positions[0], plant)
+        c.planted_positions[0] = None
+        self.assertTrue(c._physical_support(initial, 0, record_plant=False))
+        self.assertIsNone(c.planted_positions[0])
+        self.assertTrue(c._physical_support(initial, 0))
+        np.testing.assert_array_equal(c.planted_positions[0], initial.sole_positions[0])
+
+    def test_support_metrics_preserve_legacy_predicate_at_boundaries_and_mixed_states(self):
+        c, _, initial = self.locked()
+        initial.sole_positions = c.lock.targets.copy()
+
+        def legacy(measured):
+            # Frozen pre-extraction acceptance expression; no diagnostic API.
+            if measured.contact_forces is None or c.lock is None:
+                return False
+            lock = c.lock
+            surface = lock.geometry.surfaces[lock.surface_id]
+            position = (measured.sole_positions[0]-lock.root_position) @ lock.rotation
+            rotation = lock.rotation.T @ measured.foot_rotations[0]
+            corners = np.array([[-.12, -.042, 0], [.12, -.042, 0],
+                                [.12, .042, 0], [-.12, .042, 0]]) @ rotation.T+position
+            plane_error = np.abs(corners @ surface.normal+surface.offset).max()
+            tilt = math.acos(float(np.clip(rotation[:, 2] @ surface.normal, -1, 1)))
+            force, planted = measured.contact_forces[0], c.planted_positions[0]
+            loaded = force[2] >= .12*measured.body_weight and force[2] >= .75*np.linalg.norm(force)
+            slip = planted is not None and np.linalg.norm(measured.sole_positions[0, :2]-planted[:2]) > c.cfg.max_slip
+            return (c._footprint_in_tread(measured, 0) and plane_error <= c.cfg.height_tolerance
+                    and loaded and np.linalg.norm(measured.sole_velocities[0]) <= c.cfg.max_sole_speed
+                    and tilt <= c.cfg.foot_tilt_tolerance_rad and not slip)
+
+        rng = np.random.default_rng(4)
+        for i in range(80):
+            measured = copy.deepcopy(initial)
+            if i < 8:
+                # Inclusive boundaries, then the immediately adjacent float.
+                limit = (.12*measured.body_weight if i < 2 else c.cfg.max_sole_speed if i < 4
+                         else c.cfg.height_tolerance if i < 6 else c.cfg.max_slip)
+                value = limit if i % 2 == 0 else np.nextafter(limit, np.inf)
+                if i < 2:
+                    measured.contact_forces[0, 2] = value
+                elif i < 4:
+                    measured.sole_velocities[0, 0] = value
+                elif i < 6:
+                    measured.sole_positions[0, 2] += value
+                else:
+                    c.planted_positions[0] = measured.sole_positions[0]-[0., value, 0.]
+            else:
+                c.planted_positions[0] = initial.sole_positions[0].copy() if i % 2 else None
+                measured.sole_positions[0] += rng.uniform(-.025, .025, 3)
+                measured.sole_velocities[0] = rng.uniform(-.07, .07, 3)
+                measured.contact_forces[0] = rng.uniform([0., 0., 100.], [200., 200., 500.])
+                angle = rng.uniform(-.15, .15)
+                measured.foot_rotations[0] = [[math.cos(angle), 0, math.sin(angle)], [0, 1, 0],
+                                             [-math.sin(angle), 0, math.cos(angle)]]
+            self.assertEqual(c.physical_support_metrics(measured, 0)["valid"], bool(legacy(measured)))
+            self.assertEqual(c._physical_support(measured, 0, record_plant=False), bool(legacy(measured)))
+        measured.contact_forces = None
+        self.assertFalse(c.physical_support_metrics(measured, 0)["valid"])
+        self.assertFalse(c._physical_support(measured, 0))
 
     def test_lower_reference_speed_is_bounded(self):
         c, g, m = self.locked(-1)

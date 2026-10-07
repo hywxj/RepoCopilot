@@ -109,6 +109,52 @@ class DynamicStairMotionTest(unittest.TestCase):
                 episode.save_trace(path)
             self.assertFalse(path.exists())
 
+    def test_initial_conditions_are_physical_reproducible_and_lock_is_bounded(self):
+        from legged_lab.perception.mujoco_stair_motion import DynamicTeachingEpisode
+        configuration = dict(initial_forward_offset=.054, initial_lateral_offset=.002,
+                             initial_yaw=.002, initial_joint_velocity_noise=.005, seed=7)
+        first = DynamicTeachingEpisode(**configuration)
+        second = DynamicTeachingEpisode(**configuration)
+        np.testing.assert_allclose(first.initial_qpos, second.initial_qpos)
+        np.testing.assert_allclose(first.initial_qvel, second.initial_qvel)
+        self.assertAlmostEqual(first.initial_qpos[0], .054)
+        self.assertAlmostEqual(first.initial_qpos[1], .002)
+        self.assertAlmostEqual(first.initial_qpos[6], np.sin(.001))
+        self.assertGreater(np.linalg.norm(first.initial_qvel[6:]), 0.)
+        # The obstacle stays at its real location despite initial robot offsets.
+        self.assertAlmostEqual(first.model.geom_pos[
+            mujoco.mj_name2id(first.model, mujoco.mjtObj.mjOBJ_GEOM, "tread_0"), 0], .38)
+        np.testing.assert_allclose(first.data.qpos, second.data.qpos)
+        with self.assertRaisesRegex(RuntimeError, "No valid tread lock"):
+            DynamicTeachingEpisode(lock_timeout_s=.01)
+        with self.assertRaisesRegex(ValueError, "Initial conditions"):
+            DynamicTeachingEpisode(initial_yaw=np.nan)
+
+    def test_descent_forward_offsets_keep_original_contact_acceptance(self):
+        from legged_lab.perception.mujoco_stair_motion import DynamicTeachingEpisode
+        for offset in (.045, .055):
+            with self.subTest(offset=offset):
+                episode = DynamicTeachingEpisode(direction=-1, initial_forward_offset=offset)
+                for _ in range(550):
+                    sample = episode.tick()
+                    if sample["success"]:
+                        break
+                self.assertTrue(sample["success"])
+                self.assertGreaterEqual(sample["stable_for_s"], .25)
+                for foot in range(2):
+                    self.assertTrue(episode.controller._physical_support(
+                        episode.measurement(), foot, min_load=.2, record_plant=False))
+
+    def test_failed_preview_releases_context_before_constructor_returns(self):
+        from unittest.mock import patch
+        from legged_lab.perception.mujoco_stair_motion import DynamicTeachingEpisode
+        with patch("legged_lab.perception.mujoco_stair_motion.plan_com_preview",
+                   side_effect=RuntimeError("preview failure")), patch(
+                       "legged_lab.scripts.mujoco_stair_teacher.TeachingEpisode.close") as close:
+            with self.assertRaisesRegex(RuntimeError, "preview failure"):
+                DynamicTeachingEpisode()
+            close.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

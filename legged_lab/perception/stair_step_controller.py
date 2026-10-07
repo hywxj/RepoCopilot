@@ -329,9 +329,13 @@ class StairStepController:
         return (separation >= self.cfg.min_foot_separation
                 and lock.geometry.footprint_supported(lock.surface_id, position[:2], yaw))
 
-    def _physical_support(self, m, foot, min_load=0.12, record_plant=True):
+    def physical_support_metrics(self, m, foot, min_load=0.12):
+        """Read-only measurements and exact existing support gates for diagnosis."""
         if m.contact_forces is None or self.lock is None:
-            return False
+            return dict(available=False, valid=False, conditions={}, measurements={}, limits={},
+                        failed_conditions=[name for name, missing in
+                            (("contact_forces_unavailable", m.contact_forces is None),
+                             ("target_lock_unavailable", self.lock is None)) if missing])
         lock = self.lock
         surface = lock.geometry.surfaces[lock.surface_id]
         position = (m.sole_positions[foot]-lock.root_position) @ lock.rotation
@@ -342,13 +346,32 @@ class StairStepController:
         plane_error = np.abs(corners @ surface.normal + surface.offset).max()
         tilt = math.acos(float(np.clip(rotation[:, 2] @ surface.normal, -1, 1)))
         force = m.contact_forces[foot]
-        loaded = force[2] >= min_load*m.body_weight and force[2] >= 0.75*np.linalg.norm(force)
-        static = np.linalg.norm(m.sole_velocities[foot]) <= self.cfg.max_sole_speed
+        force_norm = np.linalg.norm(force)
+        speed = np.linalg.norm(m.sole_velocities[foot])
         planted = self.planted_positions[foot]
-        slip = planted is not None and np.linalg.norm(m.sole_positions[foot, :2]-planted[:2]) > self.cfg.max_slip
-        valid = (footprint and plane_error <= self.cfg.height_tolerance and loaded and static
-                 and tilt <= self.cfg.foot_tilt_tolerance_rad and not slip)
-        if valid and planted is None and record_plant:
+        slip_distance = None if planted is None else np.linalg.norm(m.sole_positions[foot, :2]-planted[:2])
+        slip = planted is not None and slip_distance > self.cfg.max_slip
+        conditions = dict(region=bool(footprint), plane=bool(plane_error <= self.cfg.height_tolerance),
+                          load=bool(force[2] >= min_load*m.body_weight),
+                          force_direction=bool(force[2] >= .75*force_norm),
+                          speed=bool(speed <= self.cfg.max_sole_speed),
+                          tilt=bool(tilt <= self.cfg.foot_tilt_tolerance_rad), slip=not bool(slip))
+        return dict(available=True, valid=all(conditions.values()), conditions=conditions,
+                    failed_conditions=[name for name, valid in conditions.items() if not valid],
+                    measurements=dict(plane_error_m=float(plane_error), tilt_rad=float(tilt),
+                        vertical_force_n=float(force[2]), force_norm_n=float(force_norm),
+                        load_fraction=float(force[2]/m.body_weight) if m.body_weight > 0 else None,
+                        vertical_force_fraction=float(force[2]/force_norm) if force_norm > 0 else None,
+                        sole_speed_m_s=float(speed),
+                        slip_distance_m=None if slip_distance is None else float(slip_distance)),
+                    limits=dict(plane_error_m=float(self.cfg.height_tolerance),
+                        tilt_rad=float(self.cfg.foot_tilt_tolerance_rad), load_fraction=float(min_load),
+                        minimum_vertical_force_n=float(min_load*m.body_weight), vertical_force_fraction=.75,
+                        sole_speed_m_s=float(self.cfg.max_sole_speed), slip_distance_m=float(self.cfg.max_slip)))
+
+    def _physical_support(self, m, foot, min_load=0.12, record_plant=True):
+        valid = self.physical_support_metrics(m, foot, min_load)["valid"]
+        if valid and self.planted_positions[foot] is None and record_plant:
             self.planted_positions[foot] = m.sole_positions[foot].copy()
         return valid
 

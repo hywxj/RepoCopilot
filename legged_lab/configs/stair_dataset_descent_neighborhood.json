@@ -1,0 +1,9 @@
+{
+  "description": "Training-only neighbors around the independently held-out 55mm descent. These are distinct physical initial conditions; failures remain in the manifest.",
+  "scenarios": [
+    {"name": "down_forward_55mm_lateral_1mm", "direction": "down", "initial_forward_offset": 0.055, "initial_lateral_offset": 0.001, "dataset_split": "train"},
+    {"name": "down_forward_55mm_lateral_minus1mm", "direction": "down", "initial_forward_offset": 0.055, "initial_lateral_offset": -0.001, "dataset_split": "train"},
+    {"name": "down_forward_54mm", "direction": "down", "initial_forward_offset": 0.054, "dataset_split": "train"},
+    {"name": "down_forward_56mm", "direction": "down", "initial_forward_offset": 0.056, "dataset_split": "train"}
+  ]
+}

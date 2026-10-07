@@ -1,0 +1,14 @@
+{
+  "scenarios": [
+    {"name": "up_nominal", "direction": "up", "dataset_split": "train"},
+    {"name": "down_nominal", "direction": "down", "dataset_split": "train"},
+    {"name": "up_left", "direction": "up", "initial_lateral_offset": -0.001, "dataset_split": "train"},
+    {"name": "up_right", "direction": "up", "initial_lateral_offset": 0.002, "dataset_split": "train"},
+    {"name": "down_near", "direction": "down", "initial_forward_offset": 0.054, "dataset_split": "train"},
+    {"name": "down_far", "direction": "down", "initial_forward_offset": 0.056, "dataset_split": "train"},
+    {"name": "down_left", "direction": "down", "initial_forward_offset": 0.055, "initial_lateral_offset": -0.001, "dataset_split": "train"},
+    {"name": "down_right", "direction": "down", "initial_forward_offset": 0.055, "initial_lateral_offset": 0.001, "dataset_split": "train"},
+    {"name": "up_lateral_holdout", "direction": "up", "initial_lateral_offset": 0.001, "dataset_split": "validation"},
+    {"name": "down_forward_holdout", "direction": "down", "initial_forward_offset": 0.055, "dataset_split": "validation"}
+  ]
+}

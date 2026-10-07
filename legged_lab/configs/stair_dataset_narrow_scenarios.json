@@ -1,0 +1,11 @@
+{
+  "description": "Second physical collection batch after the broad-position probe. Outcomes, including failures, are retained in its manifest.",
+  "scenarios": [
+    {"name": "up_nominal", "direction": "up", "dataset_split": "train"},
+    {"name": "up_lateral_1mm", "direction": "up", "initial_lateral_offset": 0.001, "dataset_split": "validation"},
+    {"name": "up_lateral_minus1mm", "direction": "up", "initial_lateral_offset": -0.001, "dataset_split": "train"},
+    {"name": "up_lateral_minus2mm", "direction": "up", "initial_lateral_offset": -0.002, "dataset_split": "train"},
+    {"name": "down_forward_40mm", "direction": "down", "initial_forward_offset": 0.04, "dataset_split": "train"},
+    {"name": "down_forward_60mm", "direction": "down", "initial_forward_offset": 0.06, "dataset_split": "validation"}
+  ]
+}

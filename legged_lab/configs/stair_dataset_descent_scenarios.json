@@ -1,0 +1,9 @@
+{
+  "description": "Descent batch for the revised in-region touchdown reference; physical position-PD outcomes determine data eligibility.",
+  "scenarios": [
+    {"name": "down_forward_45mm", "direction": "down", "initial_forward_offset": 0.045, "dataset_split": "train"},
+    {"name": "down_nominal", "direction": "down", "dataset_split": "train"},
+    {"name": "down_forward_55mm", "direction": "down", "initial_forward_offset": 0.055, "dataset_split": "validation"},
+    {"name": "down_lateral_1mm", "direction": "down", "initial_lateral_offset": 0.001, "dataset_split": "train"}
+  ]
+}

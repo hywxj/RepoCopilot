@@ -17,3 +17,7 @@ legged_lab/envs/elf3/datasets/motion_visualization/elf3_bmlrub_walk_gmr/
 *.zip
 .venv/
 venv/
+
+# MuJoCo model dumps and local verification caches
+MJMODEL.TXT
+.pytest_cache/

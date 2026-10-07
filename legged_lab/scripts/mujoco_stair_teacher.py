@@ -121,7 +121,7 @@ def draw_motion_status(scene, sample):
     scene.ngeom += 1
 
 
-def build_model(height=.11, width=.32, direction=1):
+def build_model(height=.11, width=.32, direction=1, *, with_depth_camera=False):
     source = ROOT/"legged_lab/assets/elf3_lite/xml/elf3.xml"
     xml = ET.parse(source).getroot()
     for include in list(xml.findall("include")):
@@ -149,6 +149,9 @@ def build_model(height=.11, width=.32, direction=1):
     for item in list(sensor):
         if item.tag == "touch":
             sensor.remove(item)
+    if with_depth_camera:
+        from legged_lab.perception.mujoco_depth_geometry import add_depth_camera
+        add_depth_camera(xml)
     model = mujoco.MjModel.from_xml_string(ET.tostring(xml, encoding="unicode"))
     data = mujoco.MjData(model)
     for joint in range(model.njnt):
@@ -169,8 +172,11 @@ def build_model(height=.11, width=.32, direction=1):
 
 
 class TeachingEpisode:
-    def __init__(self, height=.11, width=.32, direction=1):
-        self.model, self.data = build_model(height, width, direction)
+    def __init__(self, height=.11, width=.32, direction=1, *, geometry_source="known"):
+        if geometry_source not in ("known", "depth"):
+            raise ValueError("Geometry source must be known or depth.")
+        self.geometry_source = geometry_source
+        self.model, self.data = build_model(height, width, direction, with_depth_camera=geometry_source == "depth")
         # The coordinated posture/trajectory is an ascent candidate. Descent
         # retains its previous control until its own motion quality is improved.
         self.teacher = MujocoStepTeacher(self.model, self.data, posture_control=direction > 0)
@@ -180,13 +186,19 @@ class TeachingEpisode:
                                                              support_com_half_width_m=.010 if direction > 0 else 0.,
                                                              overlap_swing_lift=direction > 0))
         self.direction = direction
-        x, y = np.meshgrid(np.arange(-.32, .94, .003), np.arange(-.38, .38, .003))
-        levels = np.where(x < .22, 0, np.where(x < .22+width, 1, 2))
-        heights = levels*height if direction > 0 else (2-levels)*height
-        heights = np.where(x >= .22+2*width, 0., heights)
-        self.world_points = np.column_stack((x.ravel(), y.ravel(), heights.ravel()))
+        self.world_points = None
+        if geometry_source == "known":
+            x, y = np.meshgrid(np.arange(-.32, .94, .003), np.arange(-.38, .38, .003))
+            levels = np.where(x < .22, 0, np.where(x < .22+width, 1, 2))
+            heights = levels*height if direction > 0 else (2-levels)*height
+            heights = np.where(x >= .22+2*width, 0., heights)
+            self.world_points = np.column_stack((x.ravel(), y.ravel(), heights.ravel()))
         self.extractor = TreadSurfaceExtractor(SurfaceValidationCfg(min_forward=-.35, max_forward=1.1,
                                                                    lateral_half_width=.60, grid_size=.01))
+        self.depth_source = None
+        if geometry_source == "depth":
+            from legged_lab.perception.mujoco_depth_geometry import MujocoDepthGeometry
+            self.depth_source = MujocoDepthGeometry(self.model, self.extractor.cfg)
         self.geometry, self.geometry_time = None, -1.
         self.dt = .01
         self.initial_root = self.measurement().root_position.copy()
@@ -197,17 +209,24 @@ class TeachingEpisode:
         self.target_region_quads = np.empty((0, 4, 3))
 
     def measurement(self):
-        m = self.teacher.reader.measurement(self.data, include_contact_truth=True, camera_timestamp=self.geometry_time)
+        generation = 0 if self.depth_source is None else self.depth_source.memory.generation
+        m = self.teacher.reader.measurement(self.data, generation=generation, include_contact_truth=True,
+                                          camera_timestamp=self.geometry_time)
         hips = [mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, name)
                 for name in ("l_hip_z_link", "r_hip_z_link")]
         m.hip_offsets = self.data.xpos[hips]-m.root_position
         m.com_offset = self.data.subtree_com[self.teacher.reader.root_id]-m.root_position
         return m
 
-    def tick(self):
-        mujoco.mj_forward(self.model, self.data)
-        m, c = self.measurement(), self.controller
-        state = (float(self.data.time), self.data.qpos.copy(), self.data.qvel.copy())
+    def refresh_geometry(self, measurement=None, *, tracking_only=False):
+        """Refresh the observation source without changing a locked target."""
+        m = self.measurement() if measurement is None else measurement
+        if self.depth_source is not None:
+            self.geometry = self.depth_source.update(self.data, tracking_only=tracking_only)
+            self.geometry_time = self.depth_source.last_frame_time
+            m.camera_timestamp = self.geometry_time
+            m.generation = self.depth_source.memory.generation
+            return self.geometry
         if m.timestamp-self.geometry_time >= .08:
             self.geometry_time = m.timestamp
             self.geometry = self.extractor.extract((self.world_points-m.root_position) @ m.yaw_rotation)
@@ -224,6 +243,17 @@ class TeachingEpisode:
             for surface in self.geometry.surfaces:
                 surface.track_id = int(round((float(surface.height_at(surface.centroid[:2]))+m.root_position[2])/.01))
                 surface.last_observed_time = self.geometry_time
+        return self.geometry
+
+    def close(self):
+        if self.depth_source is not None:
+            self.depth_source.close()
+
+    def tick(self):
+        mujoco.mj_forward(self.model, self.data)
+        m, c = self.measurement(), self.controller
+        state = (float(self.data.time), self.data.qpos.copy(), self.data.qvel.copy())
+        self.refresh_geometry(m)
         c.update(self.geometry, m, self.dt)
         c.constrain_body_reference(m)
         if c.lock is not None and self.target_region is None:
@@ -232,7 +262,8 @@ class TeachingEpisode:
             self.target_region = {
                 "task_goal": TASK_GOAL,
                 "reference_role": "teacher_control_waypoints_not_required_foot_centers",
-                "region_source": "locked_observed_mask_from_known_simulation_treads",
+                "region_source": ("locked_observed_mask_from_rendered_depth" if self.geometry_source == "depth"
+                                  else "locked_observed_mask_from_known_simulation_treads"),
                 "track_id": int(c.lock.track_id), "locked_at": float(m.timestamp),
                 "observed_quads_world": self.target_region_quads.tolist(),
                 "observed_bounds_world": [vertices.min(axis=0).tolist(), vertices.max(axis=0).tolist()],
@@ -300,7 +331,8 @@ class TeachingEpisode:
                             reference_role="teacher_control_waypoints_not_required_foot_centers",
                             trace_role="physical_motion_candidate", motion_quality_validated=False,
                             controller_profile="coordinated_ascent" if self.direction > 0 else "legacy_descent",
-                            known_geometry=True, force_oracle=True, learned_policy=False)
+                            geometry_source=self.geometry_source,
+                            known_geometry=self.geometry_source == "known", force_oracle=True, learned_policy=False)
 
 
 def main():
@@ -311,6 +343,8 @@ def main():
     parser.add_argument("--direction", choices=("up", "down"), default="up")
     parser.add_argument("--controller", choices=("dynamic", "staged"), default="dynamic",
                         help="Dynamic up/down motion candidate, or the earlier staged baseline.")
+    parser.add_argument("--geometry_source", choices=("known", "depth"), default="known",
+                        help="Use known treads or an actual rendered D435i depth stream for target locking.")
     parser.add_argument("--initial_forward_offset", type=float, default=.05,
                         help="Dynamic scene initial forward offset in metres; applied before physics, not an approach skill.")
     parser.add_argument("--show_foot_targets", action="store_true",
@@ -324,9 +358,10 @@ def main():
     direction = 1 if args.direction == "up" else -1
     if args.controller == "dynamic":
         from legged_lab.perception.mujoco_stair_motion import DynamicTeachingEpisode
-        episode = DynamicTeachingEpisode(direction=direction, initial_forward_offset=args.initial_forward_offset)
+        episode = DynamicTeachingEpisode(direction=direction, initial_forward_offset=args.initial_forward_offset,
+                                         geometry_source=args.geometry_source)
     else:
-        episode = TeachingEpisode(direction=direction)
+        episode = TeachingEpisode(direction=direction, geometry_source=args.geometry_source)
     viewer = None if args.headless else mujoco.viewer.launch_passive(episode.model, episode.data)
     if viewer is not None:
         viewer.cam.lookat[:] = [.3, 0., .65]
@@ -334,7 +369,7 @@ def main():
         viewer.set_texts((None, mujoco.mjtGridPos.mjGRID_TOPLEFT,
                           f"{args.direction.upper()} STAIRS | ACTION TEACHER (not learned policy)",
                           "green: observed target tread"))
-    print("[MODE] PHYSICAL ACTION TEACHER | known simulation treads | NOT learned-policy/depth-transfer playback", flush=True)
+    print(f"[MODE] PHYSICAL ACTION TEACHER | geometry={args.geometry_source} | NOT learned-policy playback", flush=True)
     print("[PROFILE] "+json.dumps({"controller": args.controller,
                                    "initial_forward_offset_m": getattr(episode, "initial_forward_offset", 0.)}), flush=True)
     index, failure, last_phase = 0, "", ""
@@ -358,7 +393,8 @@ def main():
                 time.sleep(max(0., episode.dt-(time.monotonic()-started)))
             done = sample["phase"] in ("COMPLETE", "RECOVER") or episode.data.time >= args.duration
             if done:
-                report = {"mode": "physical_action_teacher", "geometry_source": "known_simulation_treads",
+                report = {"mode": "physical_action_teacher", "geometry_source": args.geometry_source,
+                          "known_geometry": args.geometry_source == "known",
                           "learned_policy": False, "depth_transfer_verified": False, "force_oracle": True,
                           "root_fixed": False, "teleport_after_reset": False, "success": sample["success"],
                           "motion_quality_validated": False,
@@ -384,16 +420,20 @@ def main():
                     last_phase, index = "", index+1
                     continue
                 mujoco.mj_resetData(episode.model, episode.data)
-                replacement = TeachingEpisode(direction=episode.direction)
+                episode.close()
+                replacement = TeachingEpisode(direction=episode.direction, geometry_source=args.geometry_source)
                 episode.data.qpos[:] = replacement.data.qpos
                 mujoco.mj_forward(episode.model, episode.data)
                 replacement.model, replacement.data = episode.model, episode.data
+                if replacement.depth_source is not None:
+                    replacement.depth_source.model = episode.model
                 replacement.teacher = MujocoStepTeacher(episode.model, episode.data,
                                                        posture_control=episode.direction > 0)
                 episode, last_phase, index = replacement, "", index+1
         if failure:
             (output/f"{args.direction}_{index:03d}_failed.json").write_text(json.dumps(
                 {"mode": "physical_action_teacher", "success": False, "failure": failure,
+                 "geometry_source": args.geometry_source, "known_geometry": args.geometry_source == "known",
                  "task_goal": TASK_GOAL, "target_region": episode.target_region,
                  "samples": episode.samples}, indent=2)+"\n")
             if viewer is not None:
@@ -404,6 +444,7 @@ def main():
                     time.sleep(.03)
             raise RuntimeError(failure)
     finally:
+        episode.close()
         if viewer is not None:
             viewer.close()
 

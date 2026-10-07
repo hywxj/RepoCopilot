@@ -19,7 +19,7 @@ flowchart LR
 仓库附带 [5 帧原始样例](examples/perception/stairs_15cm/README.md)，含 RGB、深度、相机参数、配对机身／足部位姿及原始采集时间戳。本机执行：
 
 ```bash
-cd /home/hamlet/TienKung-Lab-perception
+cd /home/hamlet/ELF3-Perception
 /home/hamlet/miniconda3/envs/isaac_sim_env/bin/python -m legged_lab.scripts.replay_stair_surfaces \
   --input_dirs examples/perception/stairs_15cm \
   --output_dir logs/perception_restore/demo \

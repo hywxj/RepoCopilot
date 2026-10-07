@@ -94,6 +94,8 @@ class _MaskedHistoryBuffer:
 
 
 class Elf3Env(VecEnv):
+    supports_amp_terminal_states = True
+
     def __init__(
         self,
         # cfg: (
@@ -1455,7 +1457,16 @@ class Elf3Env(VecEnv):
                 torch.zeros_like(self.stair_verified_contact_count),
             )
         self.reset_env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
+        # AMP's last transition must end in this episode's physical state.
+        # Reset can reuse the robot's tensors, so preserve both values and row
+        # identities before it replaces terminal states with new initial ones.
+        terminal_amp_env_ids = self.reset_env_ids.detach().clone()
+        terminal_amp_observations = self.get_amp_obs_for_expert_trans()[terminal_amp_env_ids].detach().clone()
         self.reset(self.reset_env_ids)
+        # Publish fresh empty tensors on steps without resets as well; extras
+        # persists across steps and must never retain an earlier termination.
+        self.extras["terminal_amp_env_ids"] = terminal_amp_env_ids
+        self.extras["terminal_amp_observations"] = terminal_amp_observations
 
         actor_obs, critic_obs = self.compute_observations(update_geometry=False)
         self.extras["observations"] = {"critic": critic_obs}

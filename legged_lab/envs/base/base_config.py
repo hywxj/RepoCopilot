@@ -52,6 +52,7 @@ class BaseSceneCfg:
     max_episode_length_s: float = 20.0
     num_envs: int = 4096
     env_spacing: float = 2.5
+    contact_history_length: int = 3
     robot: ArticulationCfg = MISSING
     terrain_type: str = MISSING
     terrain_generator: TerrainGeneratorCfg = None

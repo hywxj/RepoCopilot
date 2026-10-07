@@ -44,6 +44,8 @@ from rsl_rl.utils import AMPLoaderDisplay
 
 
 class TienKungEnv(VecEnv):
+    supports_amp_terminal_states = True
+
     def __init__(
         self,
         cfg: (
@@ -494,7 +496,13 @@ class TienKungEnv(VecEnv):
         self.reset_buf, self.time_out_buf = self.check_reset()
         reward_buf = self.reward_manager.compute(self.step_dt)
         self.reset_env_ids = self.reset_buf.nonzero(as_tuple=False).flatten()
+        # Preserve the actual episode endpoint before reset reuses state tensors.
+        terminal_amp_env_ids = self.reset_env_ids.detach().clone()
+        terminal_amp_observations = self.get_amp_obs_for_expert_trans()[terminal_amp_env_ids].detach().clone()
         self.reset(self.reset_env_ids)
+        # Overwrite on every step, including fresh empty tensors without resets.
+        self.extras["terminal_amp_env_ids"] = terminal_amp_env_ids
+        self.extras["terminal_amp_observations"] = terminal_amp_observations
 
         actor_obs, critic_obs = self.compute_observations()
         self.extras["observations"] = {"critic": critic_obs}

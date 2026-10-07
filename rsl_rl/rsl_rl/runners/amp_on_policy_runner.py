@@ -19,10 +19,14 @@
 from __future__ import annotations
 
 import inspect
+import json
+import math
 import os
 import statistics
 import time
 from collections import deque
+from copy import deepcopy
+from pathlib import Path
 
 import torch
 
@@ -53,6 +57,29 @@ def _create_amp_loader(env, train_cfg, device):
                      motion_files=train_cfg["amp_motion_files"])
 
 
+def _restore_terminal_amp_observations(next_observations, dones, infos):
+    """Keep the final physical state of the old episode in its AMP transition."""
+    done_ids = torch.nonzero(dones.reshape(-1), as_tuple=False).flatten().to(next_observations.device)
+    ids = infos.get("terminal_amp_env_ids")
+    terminal = infos.get("terminal_amp_observations")
+    if ids is None or terminal is None:
+        if len(done_ids):
+            raise ValueError("AMP requires pre-reset terminal_amp_env_ids and terminal_amp_observations.")
+        return next_observations.clone()
+    if not isinstance(ids, torch.Tensor) or ids.ndim != 1 or ids.dtype != torch.long:
+        raise ValueError("terminal_amp_env_ids must be a vector of int64 environment indices.")
+    ids = ids.to(next_observations.device)
+    if not torch.equal(torch.sort(ids).values, done_ids):
+        raise ValueError("AMP terminal indices must match exactly the environments that ended this step.")
+    if not isinstance(terminal, torch.Tensor) or terminal.shape != (len(ids), next_observations.shape[1]):
+        raise ValueError("AMP terminal observations have the wrong shape.")
+    if not torch.isfinite(terminal).all():
+        raise ValueError("AMP terminal observations must be finite.")
+    result = next_observations.clone()
+    result[ids] = terminal.to(device=result.device, dtype=result.dtype)
+    return result
+
+
 class AmpOnPolicyRunner:
     """On-policy runner for training and evaluation."""
 
@@ -62,6 +89,12 @@ class AmpOnPolicyRunner:
         self.policy_cfg = train_cfg["policy"]
         self.device = device
         self.env = env
+        self.amp_reward_time_scaled = bool(train_cfg.get("amp_reward_time_scaled", False))
+        self.amp_motion_mask_enabled = bool(train_cfg.get("amp_motion_mask_enabled", False))
+        if self.amp_reward_time_scaled and (not math.isfinite(env.step_dt) or env.step_dt <= 0):
+            raise ValueError("Time-scaled AMP requires a finite positive control period.")
+        if self.amp_motion_mask_enabled and not callable(getattr(env, "get_amp_motion_mask", None)):
+            raise ValueError("Motion-masked AMP requires an environment command mask.")
 
         # check if multi-gpu is enabled
         self._configure_multi_gpu()
@@ -122,6 +155,8 @@ class AmpOnPolicyRunner:
 
         # init amp loader
         amp_data = _create_amp_loader(self.env, train_cfg, device)
+        self.motion_prior_provenance = (deepcopy(amp_data.provenance)
+                                        if train_cfg.get("amp_motion_manifest") is not None else None)
         amp_normalizer = Normalizer(amp_data.observation_dim)
         discriminator = Discriminator(
             amp_data.observation_dim * 2,
@@ -187,6 +222,15 @@ class AmpOnPolicyRunner:
         self.current_learning_iteration = 0
         self.git_status_repos = [rsl_rl.__file__]
 
+    def _write_motion_prior_provenance(self):
+        """Persist the validated data identity only on the logging rank."""
+        provenance = getattr(self, "motion_prior_provenance", None)
+        if self.log_dir is None or self.disable_logs or provenance is None:
+            return
+        output = Path(self.log_dir)
+        output.mkdir(parents=True, exist_ok=True)
+        (output/"motion_prior.json").write_text(json.dumps(provenance, indent=2)+"\n")
+
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False):  # noqa: C901
         # initialize writer
         if self.log_dir is not None and self.writer is None and not self.disable_logs:
@@ -210,6 +254,7 @@ class AmpOnPolicyRunner:
                 self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
             else:
                 raise ValueError("Logger type not found. Please choose 'neptune', 'wandb' or 'tensorboard'.")
+            self._write_motion_prior_provenance()
 
         # check if teacher is loaded
         if self.training_type == "distillation" and not self.alg.policy.loaded_teacher:
@@ -258,6 +303,10 @@ class AmpOnPolicyRunner:
             residual_abs_sum = 0.0
             residual_rms_sum = 0.0
             residual_diag_steps = 0
+            amp_style_component_sum = 0.0
+            amp_task_component_sum = 0.0
+            amp_style_abs_sum = 0.0
+            amp_task_abs_sum = 0.0
             # Rollout
             with torch.inference_mode():
                 for _ in range(self.num_steps_per_env):
@@ -274,6 +323,10 @@ class AmpOnPolicyRunner:
                         residual_abs_sum += actor.last_applied_residual.abs().mean().item()
                         residual_rms_sum += actor.last_applied_residual.square().mean().sqrt().item()
                         residual_diag_steps += 1
+                    # The mask belongs to the command which generated this action,
+                    # before a reset or command resampling can replace it.
+                    amp_motion_mask = (self.env.get_amp_motion_mask().detach().clone().to(device=self.device, dtype=torch.bool)
+                                       if self.amp_motion_mask_enabled else None)
                     # Step the environment
                     obs, rewards, dones, infos = self.env.step(actions.to(self.env.device))
                     next_amp_obs = self.env.get_amp_obs_for_expert_trans()
@@ -294,14 +347,19 @@ class AmpOnPolicyRunner:
                         privileged_obs = obs
 
                     # Account for terminal state transitions
-                    next_amp_obs_with_term = torch.clone(next_amp_obs)
-                    reset_env_ids = self.env.reset_env_ids
-                    terminal_amp_states = self.env.get_amp_obs_for_expert_trans()[reset_env_ids]
-                    next_amp_obs_with_term[reset_env_ids] = terminal_amp_states
+                    next_amp_obs_with_term = _restore_terminal_amp_observations(next_amp_obs, dones, infos)
 
+                    task_component = self.alg.discriminator.task_reward_lerp * rewards
                     rewards = self.alg.discriminator.predict_amp_reward(
-                        amp_obs, next_amp_obs_with_term, rewards, normalizer=self.alg.amp_normalizer
+                        amp_obs, next_amp_obs_with_term, rewards, normalizer=self.alg.amp_normalizer,
+                        reward_dt=self.env.step_dt if self.amp_reward_time_scaled else None,
+                        motion_mask=amp_motion_mask,
                     )[0]
+                    style_component = rewards - task_component
+                    amp_task_component_sum += task_component.mean().item()
+                    amp_style_component_sum += style_component.mean().item()
+                    amp_task_abs_sum += task_component.abs().mean().item()
+                    amp_style_abs_sum += style_component.abs().mean().item()
                     amp_obs = torch.clone(next_amp_obs)
                     self.alg.process_env_step(rewards, dones, infos, next_amp_obs_with_term)
 
@@ -347,6 +405,11 @@ class AmpOnPolicyRunner:
 
             # update policy
             loss_dict = self.alg.update()
+            if self.writer is not None and not self.disable_logs:
+                self.writer.add_scalar("AMP/task_component_per_step", amp_task_component_sum / self.num_steps_per_env, it)
+                self.writer.add_scalar("AMP/style_component_per_step", amp_style_component_sum / self.num_steps_per_env, it)
+                self.writer.add_scalar("AMP/style_absolute_fraction", amp_style_abs_sum /
+                                       max(amp_style_abs_sum + amp_task_abs_sum, 1.e-12), it)
 
             stop = time.time()
             learn_time = stop - start
@@ -500,7 +563,16 @@ class AmpOnPolicyRunner:
             "amp_normalizer": self.alg.amp_normalizer,
             "iter": self.current_learning_iteration,
             "infos": infos,
+            "amp_training_contract": {
+                "terminal_states": "captured_before_reset",
+                "normalizer_statistics": "raw_current_and_next_states",
+                "gradient_penalty_coordinates": "normalized_discriminator_inputs",
+                "reward_dt": self.env.step_dt if getattr(self, "amp_reward_time_scaled", False) else None,
+                "motion_mask_enabled": getattr(self, "amp_motion_mask_enabled", False),
+            },
         }
+        if getattr(self, "motion_prior_provenance", None) is not None:
+            saved_dict["motion_prior_provenance"] = deepcopy(self.motion_prior_provenance)
         # -- Save RND model if used
         if self.alg.rnd:
             saved_dict["rnd_state_dict"] = self.alg.rnd.state_dict()

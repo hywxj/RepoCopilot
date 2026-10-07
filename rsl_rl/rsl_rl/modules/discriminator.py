@@ -16,6 +16,8 @@
 # with additional modifications by the TienKung-Lab Project,
 # and is distributed under the BSD-3-Clause license.
 
+import math
+
 import torch
 import torch.nn as nn
 from torch import autograd
@@ -79,15 +81,15 @@ class Discriminator(nn.Module):
         Compute gradient penalty for the expert data, used to regularize the discriminator.
 
         Args:
-            expert_state (torch.Tensor): Batch of expert states.
-            expert_next_state (torch.Tensor): Batch of expert next states.
+            expert_state (torch.Tensor): Expert states in the same feature coordinates
+                used for the classification loss (normalized when a normalizer is used).
+            expert_next_state (torch.Tensor): Expert next states in those same coordinates.
             lambda_ (float, optional): Gradient penalty coefficient. Defaults to 10.
 
         Returns:
             torch.Tensor: Scalar gradient penalty loss.
         """
-        expert_data = torch.cat([expert_state, expert_next_state], dim=-1)
-        expert_data.requires_grad = True
+        expert_data = torch.cat([expert_state, expert_next_state], dim=-1).detach().requires_grad_(True)
 
         disc = self.amp_linear(self.trunk(expert_data))
         ones = torch.ones(disc.size(), device=disc.device)
@@ -99,7 +101,7 @@ class Discriminator(nn.Module):
         grad_pen = lambda_ * (grad.norm(2, dim=1) - 0).pow(2).mean()
         return grad_pen
 
-    def predict_amp_reward(self, state, next_state, task_reward, normalizer=None):
+    def predict_amp_reward(self, state, next_state, task_reward, normalizer=None, *, reward_dt=None, motion_mask=None):
         """
         Predict the AMP reward given current and next states, optionally interpolated with a task reward.
 
@@ -108,12 +110,25 @@ class Discriminator(nn.Module):
             next_state (torch.Tensor): Next state tensor.
             task_reward (torch.Tensor): Task-specific reward tensor.
             normalizer (optional): Normalizer object to normalize input states before prediction.
+            reward_dt (float, optional): Control step duration in seconds. When set,
+                AMP is a reward rate integrated over this duration. Task rewards
+                are already integrated by the environment and are never scaled here.
+                Omit for the legacy per-step AMP reward.
+            motion_mask (torch.Tensor, optional): Boolean vector with shape (batch_size,)
+                selecting commands that request motion. The caller must capture it
+                before stepping/resampling commands. It gates only the AMP term;
+                the task term keeps its configured interpolation weight.
 
         Returns:
             tuple:
                 - reward (torch.Tensor): Predicted AMP reward (optionally interpolated) with shape (batch_size,).
                 - d (torch.Tensor): Raw discriminator output logits with shape (batch_size, 1).
         """
+        if reward_dt is not None and (not math.isfinite(reward_dt) or reward_dt <= 0):
+            raise ValueError("reward_dt must be finite and positive.")
+        if motion_mask is not None:
+            if motion_mask.dtype != torch.bool or motion_mask.shape != state.shape[:1]:
+                raise ValueError("motion_mask must be a boolean vector with one entry per environment.")
         with torch.no_grad():
             self.eval()
             if normalizer is not None:
@@ -122,6 +137,10 @@ class Discriminator(nn.Module):
 
             d = self.amp_linear(self.trunk(torch.cat([state, next_state], dim=-1)))
             reward = self.amp_reward_coef * torch.clamp(1 - (1 / 4) * torch.square(d - 1), min=0)
+            if reward_dt is not None:
+                reward = reward * reward_dt
+            if motion_mask is not None:
+                reward = reward * motion_mask.to(device=reward.device).unsqueeze(-1)
             if self.task_reward_lerp > 0:
                 reward = self._lerp_reward(reward, task_reward.unsqueeze(-1))
             self.train()

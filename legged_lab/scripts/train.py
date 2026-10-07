@@ -18,6 +18,7 @@
 
 import argparse
 from copy import deepcopy
+from dataclasses import replace
 import math
 
 from isaaclab.app import AppLauncher
@@ -33,6 +34,8 @@ parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
 parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
+parser.add_argument("--stair_height", "--stair-height", type=float, default=None,
+                    help="Continuous-course riser height in metres; default 0.11, optional curriculum starts at 0.04.")
 parser.add_argument(
     "--reset_optimizer",
     action="store_true",
@@ -138,6 +141,11 @@ def train():
 
     if args_cli.num_envs is not None:
         env_cfg.scene.num_envs = args_cli.num_envs
+    if args_cli.stair_height is not None:
+        if not hasattr(env_cfg, "continuous") or not math.isfinite(args_cli.stair_height) or args_cli.stair_height <= 0:
+            raise ValueError("--stair_height requires a continuous task and a finite positive height.")
+        env_cfg.continuous = replace(env_cfg.continuous, step_height=args_cli.stair_height)
+        env_cfg.scene.terrain_generator.sub_terrains["continuous"].course = env_cfg.continuous
     geometry_cfg = getattr(getattr(env_cfg.scene, "depth_camera", None), "geometry", None)
     if args_cli.step_skill_pretrain:
         if not bool(getattr(geometry_cfg, "step_control_enabled", False)):
@@ -359,7 +367,9 @@ def train():
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
 
     runner.learn(num_learning_iterations=agent_cfg.max_iterations,
-                 init_at_random_ep_len=not (bool(getattr(env, "stair_step_enabled", False)) or args_cli.standing_pretrain))
+                 init_at_random_ep_len=not (bool(getattr(env, "stair_step_enabled", False)) or
+                                           bool(getattr(env, "continuous_course_enabled", False)) or
+                                           args_cli.standing_pretrain))
 
 
 if __name__ == "__main__":
@@ -371,4 +381,5 @@ if __name__ == "__main__":
         raise
     finally:
         simulation_app.close(skip_cleanup=bool(args_cli.headless and args_cli.task and
-                                             ("geometry_step_" in args_cli.task or args_cli.standing_pretrain)))
+                                             ("geometry_step_" in args_cli.task or
+                                              args_cli.task.startswith("elf3_continuous_") or args_cli.standing_pretrain)))

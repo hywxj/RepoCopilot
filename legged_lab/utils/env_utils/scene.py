@@ -72,7 +72,8 @@ class SceneCfg(InteractiveSceneCfg):
         self.robot: ArticulationCfg = config.robot.replace(prim_path="{ENV_REGEX_NS}/Robot")
 
         self.contact_sensor = ContactSensorCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True, update_period=physics_dt
+            prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=config.contact_history_length,
+            track_air_time=True, update_period=physics_dt
         )
 
         self.light = AssetBaseCfg(

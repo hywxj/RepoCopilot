@@ -2,7 +2,7 @@
 
 面向 bxi-elf3 的感知与运动控制研究。目标是**连续、安全、尽量像人类地上下楼**，允许自主调整步长、节奏及必要的并步，不要求每级停稳。
 
-截至 2026-10-07，主线确定为“现有视觉规划 + Hiking 运动学习方法 + ELF3 GMR 先验”。**新连续运动任务尚未实现，尚无通过验收的连续上下楼策略。** 保留平面识别、安全落脚区域、单级 MuJoCo 教师和基础训练工具。
+截至 2026-10-07，主线改为**直接迁移 Hiking 官方视觉训练链路到 ELF3**：深度历史、混合专家策略、PPO + AMP 和混合地形课程共同训练。本地 GMR 已完成数据转换；现有平面识别、安全区域和 MuJoCo 教师保留作辅助与对照。**迁移验证与学习能力分开记录，尚未证明连续安全上下楼。**
 
 | 文档 | 内容 |
 | --- | --- |
@@ -14,33 +14,21 @@
 
 ## 环境
 
-现有基础栈：Python 3.10、PyTorch 2.5.1/cu121、Isaac Sim 4.5.0、Isaac Lab 2.1.0。本机环境为 `conda activate isaac_sim_env`；新机器可从仓库根目录按以下顺序安装：
+本机使用 `conda activate isaac_sim_env`。2026-10-07 实测：Python 3.11.15、PyTorch 2.7.0/cu128、Isaac Sim 5.1.0.0、Isaac Lab 包元数据 0.54.4、MuJoCo 3.11.0，GPU 为 RTX 5060 Laptop 8 GB。旧安装说明中的版本不代表本轮运行环境；`setup.py` 仍保留旧依赖声明，尚未统一环境锁定文件。
 
-```bash
-conda create -n tglab python=3.10
-conda activate tglab
-pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu121
-pip install --upgrade pip setuptools wheel
-pip install 'isaacsim[all,extscache]==4.5.0' --extra-index-url https://pypi.nvidia.com
-sudo apt install cmake build-essential
-git clone --branch v2.1.0 https://github.com/isaac-sim/IsaacLab.git
-cd IsaacLab
-./isaaclab.sh --install
-cd ..
-pip install -e .
-pip install -e rsl_rl
-pip install qpsolvers quadprog scipy pyyaml opencv-python
-```
-
-MuJoCo 教师使用 `mujoco==3.3.2`（项目依赖已声明），不需要启动 Isaac Sim。官方 InstinctLab/instinct_rl 当前依赖与此环境不同，整套复现应使用独立环境和相容提交。
+MuJoCo 教师无需启动 Isaac Sim。训练从仓库根目录运行；Hiking 使用单独锁定的官方源码与可选依赖，入口不加载旧 rsl_rl。
 
 ## 常用入口
 
 在仓库根目录和已配置的 Python 环境中运行：
 
 ```bash
-# 现有基础 AMP 任务，不是新连续楼梯训练入口
-python legged_lab/scripts/train.py --task=walk_elf3 --headless --logger=tensorboard --num_envs=256
+# 准备锁定的 Hiking 依赖与本地动作格式（首次）
+python -m legged_lab.scripts.setup_hiking
+python -m legged_lab.scripts.prepare_hiking_motion
+
+# 主线：深度感知与多地形运动共同训练
+python -m legged_lab.scripts.train_hiking --headless --num_envs 256 --max_iterations 30000
 
 # 查看单级物理教师；下楼改为 --direction down
 python -m legged_lab.scripts.mujoco_stair_teacher --controller dynamic --direction up --loop
@@ -49,4 +37,4 @@ python -m legged_lab.scripts.mujoco_stair_teacher --controller dynamic --directi
 python -m legged_lab.scripts.mujoco_stair_position_teacher --direction both --supervisor event --geometry_source known --headless --duration 40 --output_dir logs/teacher_runs/event_nominal
 ```
 
-`--loop` 会重置后重复单级动作，不代表连续楼梯。感知回放、深度教师和数据转换入口见对应文档。新主线没有可运行的训练命令；旧学生试验入口及中间训练产物已按清理记录移除。
+`--loop` 会重置后重复单级动作，不代表连续楼梯。感知回放、深度教师和数据转换入口见对应文档。旧 continuous 任务仅作真值诊断；新 Hiking 主线直接使用深度历史，楼梯课程为 5–18 cm。训练命令和验证范围见[数据与训练](docs/data_and_training.md)。

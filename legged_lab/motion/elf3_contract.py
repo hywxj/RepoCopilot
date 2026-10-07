@@ -8,7 +8,6 @@ these endpoints are not physical sole centers or collision contact points.
 
 from pathlib import Path
 
-import mujoco
 import numpy as np
 
 
@@ -90,6 +89,9 @@ class Elf3Kinematics:
     """
 
     def __init__(self, xml_path=PROJECT_XML):
+        import mujoco
+
+        self._mujoco = mujoco
         self.model = mujoco.MjModel.from_xml_path(str(Path(xml_path).resolve()))
         model = self.model
         free_ids = np.flatnonzero(model.jnt_type == mujoco.mjtJoint.mjJNT_FREE)
@@ -126,7 +128,7 @@ class Elf3Kinematics:
             data.qpos[:] = self.model.qpos0
             data.qpos[self._root_qpos:self._root_qpos + 7] = (0., 0., 0., 1., 0., 0., 0.)
             data.qpos[self._qpos_indices] = pose
-            mujoco.mj_kinematics(self.model, data)
+            self._mujoco.mj_kinematics(self.model, data)
             bodies[index] = data.xpos[self._body_ids]
             rotations = data.xmat[self._endpoint_ids].reshape(-1, 3, 3)
             endpoints[index] = data.xpos[self._endpoint_ids] + np.einsum("bij,bj->bi", rotations, END_EFFECTOR_OFFSETS)

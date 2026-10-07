@@ -71,6 +71,7 @@ class GMRMotionLoader:
         self.trajectories = []
         self.clip_ids = []
         self.clip_paths = []
+        sources = []
         categories = defaultdict(list)
         seen_ids, seen_paths, seen_hashes, group_splits = set(), set(), set(), {}
         for row in clips:
@@ -126,13 +127,14 @@ class GMRMotionLoader:
             self.trajectories.append(frames)
             self.clip_ids.append(row["id"])
             self.clip_paths.append(str(path))
+            sources.append({key: row[key] for key in ("id", "output", "output_sha256", "group", "category")})
             categories[row["category"]].append(index)
         _require(self.trajectories, f"No eligible {split} clips in manifest.")
         self.categories = tuple(sorted(categories))
         self.category_clip_indices = tuple(np.asarray(categories[category], dtype=np.int64) for category in self.categories)
         self.provenance = dict(manifest=str(self.manifest_path), manifest_sha256=hashlib.sha256(payload).hexdigest(),
                                split=split, sample_dt=sample_dt, feature_schema=FEATURE_SCHEMA,
-                               clips=list(self.clip_ids), categories=list(self.categories),
+                               clips=list(self.clip_ids), categories=list(self.categories), seed=seed, sources=sources,
                                sampling="uniform_category_then_clip_then_adjacent_frame", transitions_preloaded=False)
 
     @property

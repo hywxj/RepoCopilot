@@ -1,0 +1,12 @@
+{
+  "InstinctLab": {
+    "url": "https://github.com/project-instinct/InstinctLab.git",
+    "commit": "de6b92f01eb155d51f30e8ed1ea7aecd2eb1f057",
+    "python_path": "source/instinctlab"
+  },
+  "instinct_rl": {
+    "url": "https://github.com/project-instinct/instinct_rl.git",
+    "commit": "c3ef0d5f47834228e49d29e23768f8459abea758",
+    "python_path": "."
+  }
+}

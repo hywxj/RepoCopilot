@@ -460,9 +460,12 @@ class AMPPPO:
                 mseloss = torch.nn.MSELoss()
                 rnd_loss = mseloss(predicted_embedding, target_embedding)
 
-            # Discriminator loss.
-            policy_state, policy_next_state = sample_amp_policy
-            expert_state, expert_next_state = sample_amp_expert
+            # Keep raw frames for the running statistics. All discriminator losses
+            # in this minibatch use the same, pre-update normalization coordinates.
+            raw_policy_state, raw_policy_next_state = sample_amp_policy
+            raw_expert_state, raw_expert_next_state = sample_amp_expert
+            policy_state, policy_next_state = raw_policy_state, raw_policy_next_state
+            expert_state, expert_next_state = raw_expert_state, raw_expert_next_state
             if self.amp_normalizer is not None:
                 with torch.no_grad():
                     policy_state = self.amp_normalizer.normalize_torch(policy_state, self.device)
@@ -474,7 +477,7 @@ class AMPPPO:
             expert_loss = torch.nn.MSELoss()(expert_d, torch.ones(expert_d.size(), device=self.device))
             policy_loss = torch.nn.MSELoss()(policy_d, -1 * torch.ones(policy_d.size(), device=self.device))
             amp_loss = 0.5 * (expert_loss + policy_loss)
-            grad_pen_loss = self.discriminator.compute_grad_pen(*sample_amp_expert, lambda_=10)
+            grad_pen_loss = self.discriminator.compute_grad_pen(expert_state, expert_next_state, lambda_=10)
             loss += self.amploss_coef * amp_loss + self.amploss_coef * grad_pen_loss
 
             # Compute the gradients
@@ -499,8 +502,10 @@ class AMPPPO:
                 self.rnd_optimizer.step()
 
             if self.amp_normalizer is not None:
-                self.amp_normalizer.update(policy_state.cpu().numpy())
-                self.amp_normalizer.update(expert_state.cpu().numpy())
+                raw_frames = torch.cat(
+                    [raw_policy_state, raw_policy_next_state, raw_expert_state, raw_expert_next_state], dim=0
+                )
+                self.amp_normalizer.update(raw_frames.detach().cpu().numpy())
 
             # Store the losses
             mean_value_loss += value_loss.item()

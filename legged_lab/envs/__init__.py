@@ -36,6 +36,10 @@ from legged_lab.envs.tienkung.walk_with_sensor_cfg import (
 )
 
 from legged_lab.envs.elf3.elf3_env import Elf3Env
+from legged_lab.envs.elf3.continuous_env import ContinuousElf3Env
+from legged_lab.envs.elf3.continuous_cfg import (
+    Elf3ContinuousAgentCfg, Elf3ContinuousFlatEnvCfg, Elf3ContinuousUpEnvCfg, Elf3ContinuousDownEnvCfg,
+)
 from legged_lab.envs.elf3.walk_cfg import (
     Elf3WalkAgentCfg,
     Elf3WalkFlatEnvCfg,
@@ -69,6 +73,9 @@ from legged_lab.envs.elf3.stair_step_cfg import Elf3SingleStepUpEnvCfg, Elf3Sing
 
 task_registry.register("walk_elf3_geometry_step_up", Elf3Env, Elf3SingleStepUpEnvCfg(), Elf3SingleStepAgentCfg())
 task_registry.register("walk_elf3_geometry_step_down", Elf3Env, Elf3SingleStepDownEnvCfg(), Elf3SingleStepAgentCfg())
+task_registry.register("elf3_continuous_flat", ContinuousElf3Env, Elf3ContinuousFlatEnvCfg(), Elf3ContinuousAgentCfg())
+task_registry.register("elf3_continuous_up", ContinuousElf3Env, Elf3ContinuousUpEnvCfg(), Elf3ContinuousAgentCfg())
+task_registry.register("elf3_continuous_down", ContinuousElf3Env, Elf3ContinuousDownEnvCfg(), Elf3ContinuousAgentCfg())
 
 task_registry.register("walk", TienKungEnv, TienKungWalkFlatEnvCfg(), TienKungWalkAgentCfg())
 task_registry.register("run", TienKungEnv, TienKungRunFlatEnvCfg(), TienKungRunAgentCfg())

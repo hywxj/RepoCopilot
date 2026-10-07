@@ -21,3 +21,6 @@ venv/
 # MuJoCo model dumps and local verification caches
 MJMODEL.TXT
 .pytest_cache/
+
+# Pinned Hiking upstream checkouts and isolated optional dependencies.
+third_party/
